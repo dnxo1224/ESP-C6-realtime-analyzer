@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>C6 CSI — 대시보드</title>
+  <title>C6 CSI — 실시간 관제</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/admin.css">
@@ -12,58 +12,101 @@
 <nav>
   <a class="brand" href="/">C6 CSI</a>
   <a class="tab active" href="/">대시보드</a>
+  <a class="tab" href="/calibrations">보정</a>
   <a class="tab" href="/sessions">수집 세션</a>
-  <a class="tab" href="/inference">추론 결과</a>
+  <a class="tab" href="/inference">추론</a>
+  <span class="nav-right">
+    <span class="chip standby" id="navMode">—</span>
+    <span class="chip ok" id="navHealth">—</span>
+  </span>
 </nav>
 <main>
-  <h1 class="display">C6 실시간 시스템</h1>
-  <p class="lead">512 I/Q · 4 Rx · RF 2168 특징 · <span class="stamp" id="updated">연결 중…</span></p>
+  <h1 class="display">실시간 관제</h1>
+  <p class="lead">1 Tx · 4 Rx · 512B CSI · RF 2168 특징 · <span class="stamp" id="updated">연결 중…</span></p>
 
-  <div class="panel" style="margin-bottom:20px">
+  <div class="alert-banner fall" id="fallBanner" style="display:none"></div>
+  <div class="alert-banner stale-feed" id="staleBanner" style="display:none"></div>
+
+  <div class="panel" style="margin-top:0; margin-bottom:20px">
     <h3>운용 제어</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <!-- id를 location으로 두면 인라인 핸들러의 location이 window.location으로 풀려 "undefined"가 전송된다 -->
       <input id="calLocation" placeholder="보정 위치" value="sample-room">
-      <button onclick="control('/api/control/calibration/start?location='+encodeURIComponent(document.getElementById('calLocation').value))">10분 빈방 보정 시작</button>
-      <button onclick="control('/api/control/inference/start')">추론 시작</button>
-      <button onclick="control('/api/control/standby')">중지 / 대기</button>
+      <button class="btn-primary" id="btnCal"
+              onclick="control('/api/control/calibration/start?location='+encodeURIComponent(document.getElementById('calLocation').value))">10분 빈방 보정 시작</button>
+      <button class="btn-primary" id="btnInfer" onclick="control('/api/control/inference/start')">추론 시작</button>
+      <button class="btn-utility" id="btnStandby" onclick="control('/api/control/standby')">중지 / 대기</button>
     </div>
     <p class="hint" id="controlMessage">실제 운용에서는 빈방 상태로 10분 보정 후 추론을 시작하세요.</p>
   </div>
 
   <div class="cards">
-    <div class="card mode-infer" id="modeCard"><div class="k">현재 모드</div><div class="v" id="mode">—</div></div>
     <div class="card featured"><div class="k">적재 레이트 · 최근 60초</div><div class="v"><span id="rate">—</span><small> 행/s</small></div></div>
     <div class="card"><div class="k">마지막 수신</div><div class="v"><span id="age">—</span><small> 초 전</small></div></div>
     <div class="card"><div class="k">최신 seq</div><div class="v" id="seq">—</div></div>
     <div class="card"><div class="k">총 행수 · 추정</div><div class="v" id="rows">—</div></div>
     <div class="card"><div class="k">테이블 크기</div><div class="v"><span id="size">—</span><small> MB</small></div></div>
-    <div class="card"><div class="k">파이프라인 상태</div><div class="v" id="health">—</div></div>
   </div>
 
+  <!-- ── 라이브 CSI 뷰 — 들어오는 패킷의 진폭이 실시간으로 흐른다 ── -->
   <div class="panel">
-    <h3>Rx별 수신 — 최근 60초</h3>
-    <table>
-      <thead><tr><th>Rx</th><th>행수</th><th>레이트</th><th>평균 RSSI</th></tr></thead>
-      <tbody id="rxbody"><tr><td colspan="4">로딩…</td></tr></tbody>
-    </table>
+    <h3 style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      라이브 CSI
+      <span class="seg" id="liveRxSeg"></span>
+      <button class="btn-utility" id="btnPause">일시정지</button>
+      <span style="margin-left:auto; font-size:12px; font-weight:400; color:var(--ink-faint)" id="liveInfo">대기 중…</span>
+    </h3>
+    <canvas id="liveSpec" class="live-canvas" style="height:300px"></canvas>
+    <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--ink-faint); margin:4px 0 14px;">
+      <span>스펙트로그램 — 가로: 시간(오른쪽=현재, 약 18초 창) · 세로: 서브캐리어 246 · 색이 진할수록 진폭 큼</span>
+      <span id="liveScale"></span>
+    </div>
+    <canvas id="liveWave" class="live-canvas" style="height:140px"></canvas>
+    <div class="hint" style="margin-top:4px">파형 — 최신 패킷의 서브캐리어별 진폭 (gain 보상). 움직임이 있으면 모양이 출렁입니다.</div>
+  </div>
+
+  <div class="two-col">
+    <div class="panel">
+      <h3>Rx별 수신 — 최근 60초</h3>
+      <table>
+        <thead><tr><th>Rx</th><th>행수</th><th>레이트</th><th>평균 RSSI</th></tr></thead>
+        <tbody id="rxbody"><tr><td colspan="4">로딩…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h3>최근 에피소드</h3>
+      <table>
+        <thead><tr><th>시각</th><th>판정</th><th>최고 확률</th><th>사유</th></tr></thead>
+        <tbody id="epbody"><tr><td colspan="4">기록 없음</td></tr></tbody>
+      </table>
+    </div>
   </div>
 </main>
-<script>
+<script th:inline="none">
+// ==================== 상태 폴링 ====================
+const MODE_CLASS = { STANDBY:'standby', CALIBRATION:'calibration', INFERENCE:'inference', CAPTURE:'capture' };
+const MODE_LABEL = { STANDBY:'대기', CALIBRATION:'보정 중', INFERENCE:'추론 중', CAPTURE:'수집 중' };
+const HEALTH_CLASS = { OK:'ok', STARTING:'standby', WARNING:'warning', DEGRADED:'degraded', ERROR:'error' };
+let currentMode = null;
+
 async function refresh() {
   try {
     const s = await (await fetch('/api/stats')).json();
-    const modeCard = document.getElementById('modeCard');
-    const modeEl = document.getElementById('mode');
-    if (s.activeSession) {
-      modeEl.textContent = s.mode + ' #' + s.activeSession.id;
-      modeCard.className = 'card mode-collect';
-      modeCard.querySelector('.k').textContent = '현재 모드 · ' + s.activeSession.label;
-    } else {
-      modeEl.textContent = s.mode;
-      modeCard.className = 'card mode-infer';
-      modeCard.querySelector('.k').textContent = '현재 모드 · 무세션';
-    }
+    currentMode = s.mode;
+
+    const navMode = document.getElementById('navMode');
+    navMode.className = 'chip ' + (MODE_CLASS[s.mode] || 'standby') + (s.mode !== 'STANDBY' ? ' pulse' : '');
+    navMode.textContent = (MODE_LABEL[s.mode] || s.mode) + (s.activeSession ? ' #' + s.activeSession.id : '');
+
+    const navHealth = document.getElementById('navHealth');
+    navHealth.className = 'chip ' + (HEALTH_CLASS[s.health] || 'standby');
+    navHealth.textContent = s.health;
+
+    // 모드 인지형 버튼: 보정·추론은 STANDBY에서만, 중지는 동작 중일 때만
+    document.getElementById('btnCal').disabled = s.mode !== 'STANDBY';
+    document.getElementById('btnInfer').disabled = s.mode !== 'STANDBY';
+    document.getElementById('btnStandby').disabled = s.mode === 'STANDBY';
+
     document.getElementById('rate').textContent = s.rate;
     const age = document.getElementById('age');
     age.textContent = s.lastAgeSec < 0 ? '없음' : s.lastAgeSec;
@@ -71,8 +114,15 @@ async function refresh() {
     document.getElementById('seq').textContent = s.maxSeq.toLocaleString();
     document.getElementById('rows').textContent = Number(s.approxRows).toLocaleString();
     document.getElementById('size').textContent = s.sizeMb;
-    document.getElementById('health').textContent = s.health;
     if (s.lastError) document.getElementById('controlMessage').textContent = s.lastError;
+
+    // 수신 끊김 경고 — 동작 모드인데 데이터가 멈췄을 때
+    const staleBanner = document.getElementById('staleBanner');
+    if (s.mode !== 'STANDBY' && s.lastAgeSec > 10) {
+      staleBanner.style.display = '';
+      staleBanner.textContent = '수신 끊김 — 마지막 리포트가 ' + Math.round(s.lastAgeSec) + '초 전입니다. Relay·전원·Wi-Fi를 확인하세요.';
+    } else staleBanner.style.display = 'none';
+
     document.getElementById('rxbody').innerHTML = s.perRx.map(r =>
       `<tr><td><span class="dot rx${r.rx_id}"></span>Rx${r.rx_id}</td><td>${r.cnt}</td><td>${(r.cnt/60).toFixed(1)} Hz</td><td>${r.rssi} dBm</td></tr>`
     ).join('') || '<tr><td colspan="4">최근 60초 데이터 없음</td></tr>';
@@ -91,8 +141,148 @@ async function control(url) {
     await refresh();
   } catch (e) { message.textContent = '요청 실패: ' + e.message; }
 }
-refresh();
+
+// ==================== 최근 에피소드 + 낙상 경고 ====================
+const EP_CLASS = { CONFIRMED:'error', REJECTED:'standby', PENDING:'warning' };
+const EP_LABEL = { CONFIRMED:'낙상 확정', REJECTED:'기각', PENDING:'판정 중' };
+function fmtTs(t) {
+  return new Date(t * 1000).toLocaleTimeString('ko-KR', {hour12:false});
+}
+async function refreshEpisodes() {
+  try {
+    const eps = await (await fetch('/api/episodes?limit=8')).json();
+    document.getElementById('epbody').innerHTML = eps.map(e =>
+      `<tr><td>${fmtTs(e.start_ts)}</td>
+       <td><span class="chip ${EP_CLASS[e.status] || 'standby'}">${EP_LABEL[e.status] || e.status}</span></td>
+       <td>${Number(e.peak_probability).toFixed(3)}</td><td>${e.reason || '—'}</td></tr>`
+    ).join('') || '<tr><td colspan="4">기록 없음</td></tr>';
+
+    // 최근 10분 내 낙상 확정 → 상단 경고 배너
+    const now = Date.now() / 1000;
+    const fall = eps.find(e => e.status === 'CONFIRMED' && now - e.start_ts < 600);
+    const banner = document.getElementById('fallBanner');
+    if (fall) {
+      banner.style.display = '';
+      banner.textContent = '🚨 낙상 감지 — ' + fmtTs(fall.start_ts) + ' (최고 확률 ' + Number(fall.peak_probability).toFixed(2) + ')';
+    } else banner.style.display = 'none';
+  } catch (e) { /* 폴링 실패는 다음 주기에 재시도 */ }
+}
+
+// ==================== 라이브 CSI (스펙트로그램 + 파형) ====================
+const LIVE_COLS = 600;            // 약 18초 @ 33Hz
+const SUB_N = 246;
+const specCanvas = document.getElementById('liveSpec');
+const specCtx = specCanvas.getContext('2d');
+const waveCanvas = document.getElementById('liveWave');
+const waveCtx = waveCanvas.getContext('2d');
+const liveInfo = document.getElementById('liveInfo');
+const liveScale = document.getElementById('liveScale');
+
+let liveRx = 1;
+let liveCursor = 0;
+let livePaused = false;
+let liveScaleMax = 0;             // sticky 최대 진폭
+let liveBuf = [];                 // 최근 LIVE_COLS개의 진폭 열
+let lastPacketAt = 0;
+
+specCanvas.width = LIVE_COLS; specCanvas.height = SUB_N;
+
+// 컬러맵: 흰색 → 인디고 → 딥 네이비 (액센트 계열)
+function liveColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  const stops = [[255,255,255],[199,210,254],[99,102,241],[30,27,75]];
+  const x = t * (stops.length - 1);
+  const i = Math.min(Math.floor(x), stops.length - 2);
+  const f = x - i;
+  return [0,1,2].map(c => Math.round(stops[i][c] + (stops[i+1][c] - stops[i][c]) * f));
+}
+
+function drawSpec() {
+  const n = liveBuf.length;
+  const img = specCtx.createImageData(LIVE_COLS, SUB_N);
+  for (let x = 0; x < n; x++) {
+    const col = liveBuf[x];
+    const cx = LIVE_COLS - n + x;   // 오른쪽 정렬 — 최신이 항상 오른쪽 끝
+    for (let sc = 0; sc < SUB_N; sc++) {
+      const [r, g, b] = liveColor(liveScaleMax > 0 ? col[sc] / liveScaleMax : 0);
+      const p = ((SUB_N - 1 - sc) * LIVE_COLS + cx) * 4;
+      img.data[p] = r; img.data[p+1] = g; img.data[p+2] = b; img.data[p+3] = 255;
+    }
+  }
+  // 데이터 없는 왼쪽 영역은 흰색
+  for (let x = 0; x < LIVE_COLS - n; x++)
+    for (let y = 0; y < SUB_N; y++) {
+      const p = (y * LIVE_COLS + x) * 4;
+      img.data[p] = img.data[p+1] = img.data[p+2] = 255; img.data[p+3] = 255;
+    }
+  specCtx.putImageData(img, 0, 0);
+}
+
+function drawWave(amps) {
+  const W = waveCanvas.width = waveCanvas.clientWidth * (window.devicePixelRatio || 1);
+  const H = waveCanvas.height = waveCanvas.clientHeight * (window.devicePixelRatio || 1);
+  waveCtx.clearRect(0, 0, W, H);
+  if (!amps) return;
+  const max = Math.max(liveScaleMax, 1);
+  waveCtx.beginPath();
+  waveCtx.strokeStyle = '#4f46e5';
+  waveCtx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+  for (let i = 0; i < amps.length; i++) {
+    const x = i / (amps.length - 1) * (W - 8) + 4;
+    const y = H - 6 - (amps[i] / max) * (H - 12);
+    i === 0 ? waveCtx.moveTo(x, y) : waveCtx.lineTo(x, y);
+  }
+  waveCtx.stroke();
+}
+
+async function pollLive() {
+  if (livePaused) return;
+  try {
+    const limit = liveCursor === 0 ? 200 : 66;
+    const d = await (await fetch(`/api/live?rx=${liveRx}&afterId=${liveCursor}&limit=${limit}`)).json();
+    if (d.amps.length) {
+      liveCursor = d.lastId;
+      lastPacketAt = Date.now();
+      for (const a of d.amps) {
+        for (const v of a) if (v > liveScaleMax) liveScaleMax = v;
+        liveBuf.push(a);
+      }
+      if (liveBuf.length > LIVE_COLS) liveBuf = liveBuf.slice(liveBuf.length - LIVE_COLS);
+      drawSpec();
+      drawWave(d.amps[d.amps.length - 1]);
+      const lastSeq = d.seqs[d.seqs.length - 1];
+      const lastRssi = d.rssi[d.rssi.length - 1];
+      liveInfo.textContent = `Rx${liveRx} · seq ${lastSeq.toLocaleString()} · RSSI ${lastRssi} dBm · +${d.amps.length}패킷`;
+      liveScale.textContent = `색 스케일: 0 ~ ${Math.round(liveScaleMax)}`;
+    } else if (Date.now() - lastPacketAt > 3000) {
+      liveInfo.textContent = `Rx${liveRx} · 수신 없음 (${currentMode === 'STANDBY' ? 'STANDBY 데이터는 저장되지 않을 수 있음' : '대기 중'})`;
+    }
+  } catch (e) { liveInfo.textContent = '라이브 갱신 실패'; }
+}
+
+// Rx 세그먼트 버튼
+const seg = document.getElementById('liveRxSeg');
+for (let rx = 1; rx <= 4; rx++) {
+  const b = document.createElement('button');
+  b.innerHTML = `<span class="dot rx${rx}"></span>Rx${rx}`;
+  if (rx === liveRx) b.classList.add('on');
+  b.addEventListener('click', () => {
+    liveRx = rx; liveCursor = 0; liveBuf = []; liveScaleMax = 0;
+    [...seg.children].forEach((x, i) => x.classList.toggle('on', i + 1 === rx));
+    drawSpec(); pollLive();
+  });
+  seg.appendChild(b);
+}
+document.getElementById('btnPause').addEventListener('click', function () {
+  livePaused = !livePaused;
+  this.textContent = livePaused ? '재개' : '일시정지';
+});
+
+// ==================== 시작 ====================
+refresh(); refreshEpisodes(); pollLive();
 setInterval(refresh, 5000);
+setInterval(refreshEpisodes, 5000);
+setInterval(pollLive, 700);
 </script>
 </body>
 </html>

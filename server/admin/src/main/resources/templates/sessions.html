@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CSI Admin — 수집 세션</title>
+  <title>C6 CSI — 수집 세션</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body>
 <nav>
-  <a class="brand" href="/">CSI Admin</a>
+  <a class="brand" href="/">C6 CSI</a>
   <a class="tab" href="/">대시보드</a>
+  <a class="tab" href="/calibrations">보정</a>
   <a class="tab active" href="/sessions">수집 세션</a>
-  <a class="tab" href="/inference">추론 결과</a>
+  <a class="tab" href="/inference">추론</a>
 </nav>
 <main>
   <h1 class="display">수집 세션</h1>
@@ -45,8 +46,9 @@
           <td th:text="${r.s.sessionId}"></td>
           <td th:text="${r.s.location} ?: '—'"></td>
           <td>
-            <span th:text="${r.s.behavior} ?: '—'"></span>
-            <span class="badge live" th:if="${r.s.active}">수집 중</span>
+            <span class="chip calibration" th:if="${r.s.mode == 'CALIBRATION'}">보정</span>
+            <span th:if="${r.s.mode != 'CALIBRATION'}" th:text="${r.s.behavior} ?: '—'"></span>
+            <span class="badge live" th:if="${r.s.active}">진행 중</span>
           </td>
           <td th:text="${r.s.person} ?: '—'"></td>
           <td th:text="${r.start}"></td>
@@ -60,7 +62,7 @@
             </form>
             <form th:unless="${r.s.active}" method="post" th:action="'/sessions/' + ${r.s.sessionId} + '/delete'" style="display:inline"
                   onsubmit="return confirm('세션 데이터를 영구 삭제합니다. 계속할까요?')">
-              <button class="btn-utility" type="submit">삭제</button>
+              <button class="btn-danger" type="submit">삭제</button>
             </form>
           </td>
         </tr>

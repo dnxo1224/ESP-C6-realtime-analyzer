@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C6 CSI — 보정 관리</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">C6 CSI</a>
+  <a class="tab" href="/">대시보드</a>
+  <a class="tab active" href="/calibrations">보정</a>
+  <a class="tab" href="/sessions">수집 세션</a>
+  <a class="tab" href="/inference">추론</a>
+</nav>
+<main>
+  <h1 class="display">보정 관리</h1>
+  <p class="lead">빈방 보정 이력과 자동 임계값 — 추론은 항상 활성 보정 하나를 기준으로 동작합니다</p>
+
+  <div class="msg" th:if="${msg}" th:text="${msg}"></div>
+  <div class="msg err" th:if="${err}" th:text="${err}"></div>
+
+  <div class="panel" style="margin-top:0">
+    <h3>보정 이력</h3>
+    <table>
+      <thead><tr>
+        <th>#</th><th>상태</th><th>위치</th><th>완료 시각</th><th>임계값</th>
+        <th>점수 중앙값</th><th>윈도우</th><th>부재 에너지 q95</th><th>세션</th><th></th>
+      </tr></thead>
+      <tbody>
+        <tr th:each="c : ${rows}" th:classappend="${c.calibration_id == activeId} ? 'active-row'">
+          <td th:text="${c.calibration_id}"></td>
+          <td>
+            <span th:if="${c.status == 'VALID'}" class="chip ok">VALID</span>
+            <span th:if="${c.status == 'FAILED'}" class="chip error" th:title="${c.error_message}">FAILED</span>
+            <span th:if="${c.status == 'RUNNING'}" class="chip warning pulse">RUNNING</span>
+            <span th:if="${c.model_sha != systemModelSha}" class="chip warning" style="margin-left:4px"
+                  title="이 보정은 현재 로드된 모델과 다른 모델로 만들어졌습니다">모델 불일치</span>
+          </td>
+          <td th:text="${c.location} ?: '—'"></td>
+          <td th:text="${c.completedFmt}"></td>
+          <td th:text="${c.threshold != null} ? ${#numbers.formatDecimal(c.threshold, 1, 4)} : '—'"></td>
+          <td th:text="${c.score_median != null} ? ${#numbers.formatDecimal(c.score_median, 1, 4)} : '—'"></td>
+          <td th:text="${c.window_count}"></td>
+          <td th:text="${c.empty_motion_q95 != null} ? ${#numbers.formatDecimal(c.empty_motion_q95, 1, 3)} : '—'"></td>
+          <td><a th:href="'/sessions/' + ${c.session_id}" th:text="'#' + ${c.session_id}"
+                 style="color:var(--accent); text-decoration:none"></a></td>
+          <td style="white-space:nowrap">
+            <span class="badge live" th:if="${c.calibration_id == activeId}">활성</span>
+            <form th:if="${c.status == 'VALID' and c.calibration_id != activeId}" method="post"
+                  th:action="'/calibrations/' + ${c.calibration_id} + '/activate'" style="display:inline">
+              <button class="btn-utility" type="submit">활성화</button>
+            </form>
+          </td>
+        </tr>
+        <tr th:if="${rows.isEmpty()}"><td colspan="10">보정 이력 없음 — 대시보드에서 빈방 보정을 시작하세요</td></tr>
+      </tbody>
+    </table>
+    <div class="hint">
+      임계값은 부재 점수 분위수 규칙(q<sub>0.999</sub> + 마진)으로 자동 산출됩니다.
+      재활성화는 STANDBY에서만 가능하고, 다음 추론 시작부터 적용됩니다.
+      FAILED 행에 마우스를 올리면 실패 사유가 보입니다.
+    </div>
+  </div>
+</main>
+</body>
+</html>

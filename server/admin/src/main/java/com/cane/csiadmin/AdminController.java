@@ -88,6 +88,35 @@ public class AdminController {
         return "inference";
     }
 
+    /** 보정 관리 — 이력·임계값·재활성화. */
+    @GetMapping("/calibrations")
+    public String calibrations(Model model) {
+        Map<String, Object> state = service.systemState();
+        List<Map<String, Object>> rows = service.calibrationList().stream().map(c -> {
+            var m = new java.util.HashMap<String, Object>(c);
+            m.put("startedFmt", fmt(((Number) c.get("started_ts")).doubleValue()));
+            Object done = c.get("completed_ts");
+            m.put("completedFmt", done != null ? fmt(((Number) done).doubleValue()) : "—");
+            return (Map<String, Object>) m;
+        }).toList();
+        model.addAttribute("rows", rows);
+        model.addAttribute("activeId", state.get("active_calibration_id"));
+        model.addAttribute("systemModelSha", state.get("model_sha"));
+        model.addAttribute("mode", state.get("mode"));
+        return "calibrations";
+    }
+
+    @PostMapping("/calibrations/{id}/activate")
+    public String activateCalibration(@PathVariable long id, RedirectAttributes ra) {
+        try {
+            service.activateCalibration(id);
+            ra.addFlashAttribute("msg", "보정 #" + id + " 활성화 — 다음 추론 시작부터 적용됩니다");
+        } catch (IllegalStateException e) {
+            ra.addFlashAttribute("err", e.getMessage());
+        }
+        return "redirect:/calibrations";
+    }
+
     // ---------- 세션 조작 ----------
 
     @PostMapping("/sessions/start")
@@ -152,6 +181,15 @@ public class AdminController {
     @GetMapping("/api/system")
     @ResponseBody
     public Map<String, Object> system() { return service.systemState(); }
+
+    /** 라이브 진폭 스트림 — afterId 커서 증분 폴링. */
+    @GetMapping("/api/live")
+    @ResponseBody
+    public Map<String, Object> live(@RequestParam(defaultValue = "1") int rx,
+                                    @RequestParam(defaultValue = "0") long afterId,
+                                    @RequestParam(defaultValue = "66") int limit) {
+        return service.liveWindow(Math.min(Math.max(rx, 1), 4), afterId, Math.min(Math.max(limit, 1), 200));
+    }
 
     @PostMapping("/api/control/calibration/start")
     @ResponseBody

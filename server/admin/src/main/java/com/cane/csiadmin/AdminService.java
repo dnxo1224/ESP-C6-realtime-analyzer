@@ -217,6 +217,67 @@ public class AdminService {
                       "seqs", seqs, "amps", amps);
     }
 
+    /**
+     * 라이브 뷰: 해당 Rx에서 afterId 이후에 도착한 리포트를 시간순 최대 limit개,
+     * 각 리포트의 서브캐리어 진폭(246, gain 보상)과 함께 반환한다.
+     * 클라이언트는 lastId를 커서로 들고 증분 폴링한다 (afterId=0이면 최신 limit개).
+     */
+    public Map<String, Object> liveWindow(int rx, long afterId, int limit) {
+        var ids = new java.util.ArrayList<Long>();
+        var seqs = new java.util.ArrayList<Long>();
+        var rssis = new java.util.ArrayList<Integer>();
+        var amps = new java.util.ArrayList<double[]>();
+        jdbc.query("SELECT id, seq, rssi, gain, csi FROM "
+                   + "(SELECT id, seq, rssi, gain, csi FROM reports WHERE rx_id = ? AND id > ? "
+                   + " ORDER BY id DESC LIMIT ?) t ORDER BY id",
+                rs -> {
+                    byte[] blob = rs.getBytes("csi");
+                    double gain = rs.getDouble("gain");
+                    double[] a = new double[246];
+                    int out = 0;
+                    for (int k = 0; k < 256; k++) {
+                        if (k <= 4 || k == 128 || k >= 252) continue;
+                        int re = (int) (gain * blob[2 * k]);
+                        int im = (int) (gain * blob[2 * k + 1]);
+                        a[out++] = Math.round(Math.hypot(re, im) * 10.0) / 10.0;
+                    }
+                    ids.add(rs.getLong("id"));
+                    seqs.add(rs.getLong("seq"));
+                    rssis.add(rs.getInt("rssi"));
+                    amps.add(a);
+                },
+                rx, afterId, limit);
+        return Map.of(
+                "lastId", ids.isEmpty() ? afterId : ids.get(ids.size() - 1),
+                "seqs", seqs, "rssi", rssis, "amps", amps);
+    }
+
+    // ---------- 보정 관리 ----------
+
+    /** 보정 이력 (dsd blob 제외 — 목록에 무겁다). */
+    public List<Map<String, Object>> calibrationList() {
+        return jdbc.queryForList(
+                "SELECT c.calibration_id, c.session_id, c.status, c.started_ts, c.completed_ts, "
+                + "c.model_sha, c.window_count, c.threshold, c.score_median, c.score_quantile, "
+                + "c.empty_motion_q95, c.error_message, s.location "
+                + "FROM calibrations c JOIN sessions s ON s.session_id = c.session_id "
+                + "ORDER BY c.calibration_id DESC");
+    }
+
+    /** 과거 VALID 보정 재활성화 — STANDBY에서만, 다음 추론 시작부터 적용된다. */
+    @Transactional
+    public void activateCalibration(long calibrationId) {
+        ensureStandby();
+        Integer valid = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM calibrations WHERE calibration_id = ? AND status='VALID'",
+                Integer.class, calibrationId);
+        if (valid == null || valid == 0) {
+            throw new IllegalStateException("VALID 상태의 보정만 활성화할 수 있습니다: #" + calibrationId);
+        }
+        jdbc.update("UPDATE system_state SET active_calibration_id=?, last_error=NULL, updated_ts=? WHERE singleton_id=1",
+                calibrationId, System.currentTimeMillis() / 1000.0);
+    }
+
     public List<Map<String, Object>> inferenceResults(int minutes) {
         double since = System.currentTimeMillis() / 1000.0 - minutes * 60L;
         return jdbc.queryForList(

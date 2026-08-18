@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CSI Admin — 세션 데이터</title>
+  <title>C6 CSI — 세션 데이터</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/admin.css">
@@ -11,10 +11,11 @@
 </head>
 <body>
 <nav>
-  <a class="brand" href="/">CSI Admin</a>
+  <a class="brand" href="/">C6 CSI</a>
   <a class="tab" href="/">대시보드</a>
+  <a class="tab" href="/calibrations">보정</a>
   <a class="tab active" href="/sessions">수집 세션</a>
-  <a class="tab" href="/inference">추론 결과</a>
+  <a class="tab" href="/inference">추론</a>
 </nav>
 <main>
   <h1 class="display">세션 #<span th:text="${s.sessionId}"></span></h1>
