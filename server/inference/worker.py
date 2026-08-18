@@ -17,7 +17,10 @@ from c6_pipeline import (
 LOG = logging.getLogger("c6-worker")
 MODEL_PATH = os.getenv("MODEL_PATH", "/models/final_bundle.joblib")
 CALIBRATION_SLOTS = int(os.getenv("CALIBRATION_SLOTS", "19800"))
-POLL_SECONDS = float(os.getenv("POLL_SECONDS", "0.3"))
+# 추론 중에는 짧게 돈다 — stride 게이트를 MAX(seq) 한 방으로 확인하므로 헛도는 주기가 저렴하다.
+# 보정 중에는 10분을 기다리는 것이라 자주 볼 이유가 없다.
+POLL_SECONDS = float(os.getenv("POLL_SECONDS", "0.1"))
+CALIBRATION_POLL_SECONDS = float(os.getenv("CALIBRATION_POLL_SECONDS", "2.0"))
 
 
 def db_connect():
@@ -55,7 +58,9 @@ def load_rows(db, *, session_id=None, limit=None):
         if session_id is not None:
             cur.execute("SELECT seq,rx_id,gain,csi FROM reports WHERE session_id=%s ORDER BY id", (session_id,))
         else:
-            cur.execute("SELECT seq,rx_id,gain,csi FROM reports WHERE mode='INFERENCE' ORDER BY id DESC LIMIT %s", (limit or 1200,))
+            # 200슬롯(=4Rx×200≈800행)만 쓰므로 여유분만 가져온다. 과거엔 1600행을 받아
+            # 절반을 버리면서 진폭 변환까지 수행해 주기당 CPU를 두 배로 썼다.
+            cur.execute("SELECT seq,rx_id,gain,csi FROM reports WHERE mode='INFERENCE' ORDER BY id DESC LIMIT %s", (limit or 1000,))
         rows = cur.fetchall()
     return rows if session_id is not None else list(reversed(rows))
 
@@ -135,10 +140,24 @@ def load_profile(db, calibration_id):
 
 
 def run_inference(db, model, state, tracker, last_seq):
+    # 계약상 stride = 33슬롯(1초)마다 한 번만 판정한다. 게이트가 없으면 폴링 주기마다
+    # 추론해 CPU를 낭비하고, 무엇보다 에피소드의 '연속 정지 샘플' 판정 간격이
+    # CPU 속도에 좌우돼 검증된 동작과 어긋난다.
+    # 최신 seq는 ingest가 갱신하는 system_state.last_seq를 그대로 쓴다 — 이미 주기마다
+    # 읽는 값이라 추가 질의가 없다. (reports에는 mode 인덱스가 없어 MAX(seq) 질의는
+    # 풀스캔이 되고, 테이블이 커질수록 주기가 느려진다.)
+    # 차이가 음수면 seq 리셋(새 연결)이므로 재앵커해 즉시 판정한다.
+    stride = int(model.config.get("stride", 33))
+    newest = state.get("last_seq")
+    if newest is None:
+        return last_seq
+    if last_seq is not None and 0 <= int(newest) - last_seq < stride:
+        return last_seq
+
     calibration_id = state["active_calibration_id"]
     profile, calibration = load_profile(db, calibration_id)
-    amplitude, mask, sequences = build_grid(load_rows(db, limit=1600))
-    if len(sequences) < 200 or sequences[-1] == last_seq:
+    amplitude, mask, sequences = build_grid(load_rows(db, limit=1000))
+    if len(sequences) < 200:
         return last_seq
     amplitude, mask, sequences = amplitude[-200:], mask[-200:], sequences[-200:]
     result = interpolate_grid(amplitude, mask)
@@ -178,14 +197,16 @@ def main():
             with db.cursor() as cur:
                 cur.execute("SELECT * FROM system_state WHERE singleton_id=1")
                 state = cur.fetchone()
-            if state["mode"] == "CALIBRATION":
+            mode = state["mode"]
+            if mode == "CALIBRATION":
                 finish_calibration(db, model, state)
-            elif state["mode"] == "INFERENCE":
+            elif mode == "INFERENCE":
                 last_seq = run_inference(db, model, state, tracker, last_seq)
         except Exception as exc:
             LOG.exception("worker cycle failed")
             set_health(db, "ERROR", str(exc)[:1000], model.sha256)
-        time.sleep(POLL_SECONDS)
+            mode = None
+        time.sleep(CALIBRATION_POLL_SECONDS if mode == "CALIBRATION" else POLL_SECONDS)
 
 
 if __name__ == "__main__":

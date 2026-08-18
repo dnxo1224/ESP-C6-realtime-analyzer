@@ -10,6 +10,7 @@ VERSION = 1
 CSI_LEN = 512
 NULL_SUBCARRIERS = frozenset((0, 1, 2, 3, 4, 128, 252, 253, 254, 255))
 KEEP_SUBCARRIERS = tuple(i for i in range(256) if i not in NULL_SUBCARRIERS)
+_KEEP_INDEX = list(KEEP_SUBCARRIERS)  # numpy 인덱싱용 — 튜플은 다차원 색인으로 해석된다
 META = struct.Struct("<6s6sIIbBBBBBBBBBBbBBBBHBBfH")
 
 
@@ -17,13 +18,21 @@ class ContractError(ValueError):
     pass
 
 
-def amplitude_from_storage(raw_csi: bytes, compensate_gain: float) -> tuple[float, ...]:
-    """Apply the handoff's per-I/Q truncation before converting to amplitude."""
+def amplitude_from_storage(raw_csi: bytes, compensate_gain: float):
+    """Apply the handoff's per-I/Q truncation before converting to amplitude.
+
+    numpy는 함수 안에서 import한다 — 이 모듈은 numpy가 없는 ingest 이미지에도 복사되며,
+    ingest는 프레임 파싱만 하고 이 함수를 호출하지 않는다.
+    np.trunc는 파이썬 int()와 같은 0 방향 절삭이라 핸드오프 계약과 값이 일치한다
+    (tests/test_contract.py와 test_model_contract.py의 고정 해시가 이를 검증한다).
+    """
     if len(raw_csi) != CSI_LEN or not math.isfinite(compensate_gain) or compensate_gain <= 0:
         raise ContractError("stored C6 CSI must be 512 bytes with a positive finite gain")
-    raw = struct.unpack(f"<{CSI_LEN}b", raw_csi)
-    iq = tuple(int(compensate_gain * value) for value in raw)
-    return tuple(math.hypot(iq[2 * index], iq[2 * index + 1]) for index in KEEP_SUBCARRIERS)
+    import numpy as np
+
+    raw = np.frombuffer(raw_csi, dtype=np.int8).astype(np.float64)
+    iq = np.trunc(compensate_gain * raw).reshape(CSI_LEN // 2, 2)[_KEEP_INDEX]
+    return np.hypot(iq[:, 0], iq[:, 1])
 
 
 @dataclass(frozen=True)

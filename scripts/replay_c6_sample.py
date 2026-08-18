@@ -39,7 +39,8 @@ def make_frame(*, seq: int, rx_id: int, rssi: int, timestamp_us: int, values: li
     return frame
 
 
-def load_frames(csv_path: Path, *, slots: int, start_seq: int) -> list[list[bytes]]:
+def load_frames(csv_path: Path, *, slots: int, start_seq: int,
+                drop_rx: frozenset[int] = frozenset()) -> list[list[bytes]]:
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
     if not rows:
@@ -49,7 +50,7 @@ def load_frames(csv_path: Path, *, slots: int, start_seq: int) -> list[list[byte
         row, seq = rows[index % len(rows)], start_seq + index
         reports = []
         for rx in range(1, 5):
-            if int(row[f"rx{rx}"]) != 1:
+            if rx in drop_rx or int(row[f"rx{rx}"]) != 1:
                 continue
             reports.append(make_frame(
                 seq=seq, rx_id=rx, rssi=int(row[f"rx{rx}_rssi"]),
@@ -69,9 +70,12 @@ def main():
     parser.add_argument("--start-seq", type=int, default=100000)
     parser.add_argument("--delay", type=float, default=0.0, help="seconds per 33 Hz slot; 0 is fast replay")
     parser.add_argument("--token", default="")
+    parser.add_argument("--drop-rx", default="",
+                        help="쉼표로 구분한 Rx 번호를 전송에서 제외 (보정 게이트 실패 검증용)")
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
-    frames = load_frames(args.csv, slots=args.slots, start_seq=args.start_seq)
+    drop_rx = frozenset(int(x) for x in args.drop_rx.split(",") if x.strip())
+    frames = load_frames(args.csv, slots=args.slots, start_seq=args.start_seq, drop_rx=drop_rx)
     if args.validate_only:
         print(f"valid C6 sample: slots={len(frames)} reports={sum(map(len, frames))} csi_len=512")
         return
