@@ -1,9 +1,19 @@
 name: csi-c6
+
+# 컨테이너 로그는 기본값이 무제한이라 작은 디스크(10GB 등)를 서서히 채운다.
+# 서비스당 최대 30MB(10MB x 3)로 묶는다.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: mysql:8.4
     container_name: csi-c6-db
     restart: unless-stopped
+    logging: *default-logging
     environment:
       TZ: ${TZ:-Asia/Seoul}
       MYSQL_DATABASE: csi_c6
@@ -27,6 +37,7 @@ services:
       dockerfile: server/ingest/Dockerfile
     container_name: csi-c6-ingest
     restart: unless-stopped
+    logging: *default-logging
     environment: &db-env
       # admin의 세션 시각 표시(ZoneId.systemDefault)가 이 값을 따른다 — 없으면 UTC로 표기됨
       TZ: ${TZ:-Asia/Seoul}
@@ -52,6 +63,7 @@ services:
       dockerfile: server/inference/Dockerfile
     container_name: csi-c6-worker
     restart: unless-stopped
+    logging: *default-logging
     environment:
       <<: *db-env
       MODEL_PATH: /models/final_bundle.joblib
@@ -72,6 +84,7 @@ services:
       context: server/admin
     container_name: csi-c6-admin
     restart: unless-stopped
+    logging: *default-logging
     environment:
       <<: *db-env
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
