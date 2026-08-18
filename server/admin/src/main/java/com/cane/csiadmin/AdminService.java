@@ -72,6 +72,7 @@ public class AdminService {
 
     @Transactional
     public SessionEntity startSession(String location, String behavior, String person) {
+        ensureStandby();
         sessions.findFirstByEndTsIsNullOrderBySessionIdDesc().ifPresent(active -> {
             throw new IllegalStateException("이미 수집 중인 세션이 있습니다: #" + active.getSessionId());
         });
@@ -107,6 +108,19 @@ public class AdminService {
         if (s.isActive()) {
             throw new IllegalStateException("수집 중인 세션은 먼저 종료해야 합니다");
         }
+        // 보정 세션은 calibrations가 FK로 참조한다. 활성 보정이거나 추론 기록이 참조하는
+        // 보정을 만든 세션은 지울 수 없고, 그 외에는 보정 행까지 함께 지운다.
+        Integer blocked = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM calibrations c WHERE c.session_id = ? AND ("
+                + "c.calibration_id = (SELECT active_calibration_id FROM system_state WHERE singleton_id=1)"
+                + " OR EXISTS (SELECT 1 FROM inference_results r WHERE r.calibration_id = c.calibration_id)"
+                + " OR EXISTS (SELECT 1 FROM episodes e WHERE e.calibration_id = c.calibration_id))",
+                Integer.class, sessionId);
+        if (blocked != null && blocked > 0) {
+            throw new IllegalStateException("세션 #" + sessionId
+                    + "의 보정이 활성 상태이거나 추론 기록에서 참조 중이라 삭제할 수 없습니다");
+        }
+        jdbc.update("DELETE FROM calibrations WHERE session_id = ?", sessionId);
         long total = 0;
         int n;
         do {

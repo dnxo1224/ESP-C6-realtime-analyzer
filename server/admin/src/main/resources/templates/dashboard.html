@@ -22,8 +22,9 @@
   <div class="panel" style="margin-bottom:20px">
     <h3>운용 제어</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="location" placeholder="보정 위치" value="sample-room">
-      <button onclick="control('/api/control/calibration/start?location='+encodeURIComponent(location.value))">10분 빈방 보정 시작</button>
+      <!-- id를 location으로 두면 인라인 핸들러의 location이 window.location으로 풀려 "undefined"가 전송된다 -->
+      <input id="calLocation" placeholder="보정 위치" value="sample-room">
+      <button onclick="control('/api/control/calibration/start?location='+encodeURIComponent(document.getElementById('calLocation').value))">10분 빈방 보정 시작</button>
       <button onclick="control('/api/control/inference/start')">추론 시작</button>
       <button onclick="control('/api/control/standby')">중지 / 대기</button>
     </div>

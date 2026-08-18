@@ -5,6 +5,7 @@ services:
     container_name: csi-c6-db
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Seoul}
       MYSQL_DATABASE: csi_c6
       MYSQL_USER: csi_c6
       MYSQL_PASSWORD: ${DB_PASSWORD:-csi_c6_dev}
@@ -27,6 +28,8 @@ services:
     container_name: csi-c6-ingest
     restart: unless-stopped
     environment: &db-env
+      # admin의 세션 시각 표시(ZoneId.systemDefault)가 이 값을 따른다 — 없으면 UTC로 표기됨
+      TZ: ${TZ:-Asia/Seoul}
       DB_HOST: db
       DB_NAME: csi_c6
       DB_USER: csi_c6

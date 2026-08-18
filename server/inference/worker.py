@@ -66,24 +66,46 @@ def set_health(db, health, error=None, model_sha=None):
                     (health, error, model_sha, time.time()))
 
 
+def fail_calibration(db, model: C6Model, session_id, message: str):
+    """게이트 탈락은 재시도해도 같은 데이터로 같은 결과다 — FAILED로 기록하고
+    STANDBY로 복귀한다. 기존 VALID 보정(active_calibration_id)은 그대로 유지."""
+    now = time.time()
+    with db.cursor() as cur:
+        cur.execute("""INSERT INTO calibrations
+          (session_id,status,started_ts,completed_ts,model_sha,error_message)
+          VALUES (%s,'FAILED',(SELECT start_ts FROM sessions WHERE session_id=%s),%s,%s,%s)""",
+          (session_id, session_id, now, model.sha256, message[:1000]))
+        cur.execute("UPDATE sessions SET end_ts=%s WHERE session_id=%s", (now, session_id))
+        cur.execute("""UPDATE system_state SET mode='STANDBY',health='WARNING',active_session_id=NULL,
+          last_error=%s,updated_ts=%s WHERE singleton_id=1""", (message[:1000], now))
+    LOG.warning("calibration failed session=%s: %s", session_id, message)
+
+
 def finish_calibration(db, model: C6Model, state: dict):
     session_id = state["active_session_id"]
     if not session_id:
         raise ValueError("CALIBRATION mode has no active session")
+    # 슬롯이 찰 때까지는 값싼 COUNT만 — 전체 로드(수십 MB)는 완료 시점에 한 번
+    with db.cursor() as cur:
+        cur.execute("SELECT COUNT(DISTINCT seq) AS n FROM reports WHERE session_id=%s", (session_id,))
+        if int(cur.fetchone()["n"]) < CALIBRATION_SLOTS:
+            return
     rows = load_rows(db, session_id=session_id)
-    distinct_slots = len({int(row["seq"]) for row in rows})
-    if distinct_slots < CALIBRATION_SLOTS:
+    try:
+        amplitude, mask, sequences = build_grid(rows)
+        distinct_slots = len(sequences)
+        per_rx_rate = mask.sum(axis=0) / max(distinct_slots, 1) * 33.0
+        if np.any(per_rx_rate < 25.0):
+            raise ValueError(f"calibration requires every RX at >=25 Hz, got {per_rx_rate.tolist()}")
+        result = interpolate_grid(amplitude, mask)
+        if result.quality == "DEGRADED":
+            raise ValueError("calibration data is degraded")
+        profile = model.calibrate(result.amplitude)
+        energies = [motion_energy(result.amplitude[i:i + 200]) for i in range(0, len(amplitude) - 199, 33)]
+        empty_q95 = float(np.quantile(energies, 0.95))
+    except ValueError as exc:
+        fail_calibration(db, model, session_id, str(exc))
         return
-    amplitude, mask, _ = build_grid(rows)
-    per_rx_rate = mask.sum(axis=0) / max(distinct_slots, 1) * 33.0
-    if np.any(per_rx_rate < 25.0):
-        raise ValueError(f"calibration requires every RX at >=25 Hz, got {per_rx_rate.tolist()}")
-    result = interpolate_grid(amplitude, mask)
-    if result.quality == "DEGRADED":
-        raise ValueError("calibration data is degraded")
-    profile = model.calibrate(result.amplitude)
-    energies = [motion_energy(result.amplitude[i:i + 200]) for i in range(0, len(amplitude) - 199, 33)]
-    empty_q95 = float(np.quantile(energies, 0.95))
     now = time.time()
     with db.cursor() as cur:
         cur.execute("""INSERT INTO calibrations
