@@ -103,3 +103,38 @@ WHERE recv_ts > UNIX_TIMESTAMP()-20 GROUP BY rx_id;
 - **관리 페이지도 HTTP** — 비밀번호가 평문으로 오간다. 외부 상시 노출이라면 TLS를 앞에 둘 것
 - **Relay는 서버가 끊기면 데이터를 버린다**(큐가 차면 폐기). 저장 후 재전송 기능이 없으므로
   서버 다운타임 = 그 구간 데이터 소실
+
+## 디스크 확장 (추가 블록 스토리지)
+
+콘솔에서 스토리지를 만들어 붙이면 `/dev/vdb`로 보이지만 **포맷·마운트는 직접 해야 한다.**
+붙이기만 해서는 루트 디스크 여유가 늘지 않는다.
+
+```bash
+mkfs.ext4 -F -L csi-data /dev/vdb
+mkdir -p /mnt/data
+echo "UUID=$(blkid -s UUID -o value /dev/vdb) /mnt/data ext4 defaults,nofail 0 2" >> /etc/fstab
+mount -a
+```
+
+그다음 Docker 데이터를 옮긴다. **두 곳을 모두 옮겨야 한다** — Docker 29는 이미지를
+containerd 저장소에 두기 때문에, Docker의 `data-root`만 바꾸면 `/var/lib/containerd`가
+루트에 그대로 남는다(실제로 2.2GB가 남아 있었다).
+
+```bash
+cd /opt/csi && docker compose down
+systemctl stop docker docker.socket containerd
+
+mv /var/lib/docker /mnt/data/docker
+printf '{
+  "data-root": "/mnt/data/docker"
+}
+' > /etc/docker/daemon.json
+
+mv /var/lib/containerd /mnt/data/containerd
+sed -i '1i root = "/mnt/data/containerd"' /etc/containerd/config.toml
+
+systemctl start containerd docker
+cd /opt/csi && docker compose up -d --wait
+```
+
+실측(50GB 추가): 루트 78% → **52%**, 이미지·볼륨·로그가 모두 새 디스크로 이동.
