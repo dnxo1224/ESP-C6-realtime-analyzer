@@ -29,6 +29,24 @@ cd ..\csi_relay; idf.py menuconfig; idf.py build
 ```
 
 S3의 `menuconfig > C6 CSI relay`에서 2.4 GHz SSID/비밀번호, 서버 IP, 포트 9600,
-선택적 토큰을 설정한다. 비밀값이 든 생성 `sdkconfig`는 Git에서 제외된다.
+선택적 토큰을 설정한다. 토큰은 서버 `.env`의 `CSI_TOKEN`과 반드시 같아야 한다.
+비밀값이 든 생성 `sdkconfig`는 Git에서 제외된다.
+
+> **빌드 메모리 주의**: Docker 스택이 떠 있는 상태에서 IDF 병렬 빌드를 돌리면
+> 메모리 부족으로 컴파일러가 내부 오류(Segmentation fault)를 내며 죽는다.
+> 컨테이너를 잠시 내리고 `ninja -C build -j 1`로 순차 빌드하면 통과한다.
+
+## 실측 기준값 (2026-08-18, 책상 밀집 배치)
+
+정상 동작 시 Relay 콘솔의 통계 한 줄이 판정 기준이다:
+
+```text
+frames=7933 (132.2/s) bad=1 rx1=2003 rx2=1956 rx3=2011 rx4=1963 | wifi=up(drop 0) fwd=on sock=54
+```
+
+- `132/s` = 4 Rx × 33 Hz. 네 카운터가 고르게 올라야 정상
+- `wifi=down`이면 SSID/비밀번호, `sock=-1`이면 서버 IP·포트·방화벽을 본다
+- DB 확인: `SELECT rx_id, COUNT(*) FROM reports WHERE recv_ts > UNIX_TIMESTAMP()-60 GROUP BY rx_id`
+  → Rx당 약 2,000행(33 Hz)
 
 Rx 4대는 기존 C6 펌웨어의 RX ID 설정 방식에 따라 1~4로 각각 빌드/플래시한다.
