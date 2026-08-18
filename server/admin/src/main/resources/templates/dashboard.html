@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C6 CSI — 대시보드</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">C6 CSI</a>
+  <a class="tab active" href="/">대시보드</a>
+  <a class="tab" href="/sessions">수집 세션</a>
+  <a class="tab" href="/inference">추론 결과</a>
+</nav>
+<main>
+  <h1 class="display">C6 실시간 시스템</h1>
+  <p class="lead">512 I/Q · 4 Rx · RF 2168 특징 · <span class="stamp" id="updated">연결 중…</span></p>
+
+  <div class="panel" style="margin-bottom:20px">
+    <h3>운용 제어</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="location" placeholder="보정 위치" value="sample-room">
+      <button onclick="control('/api/control/calibration/start?location='+encodeURIComponent(location.value))">10분 빈방 보정 시작</button>
+      <button onclick="control('/api/control/inference/start')">추론 시작</button>
+      <button onclick="control('/api/control/standby')">중지 / 대기</button>
+    </div>
+    <p class="hint" id="controlMessage">실제 운용에서는 빈방 상태로 10분 보정 후 추론을 시작하세요.</p>
+  </div>
+
+  <div class="cards">
+    <div class="card mode-infer" id="modeCard"><div class="k">현재 모드</div><div class="v" id="mode">—</div></div>
+    <div class="card featured"><div class="k">적재 레이트 · 최근 60초</div><div class="v"><span id="rate">—</span><small> 행/s</small></div></div>
+    <div class="card"><div class="k">마지막 수신</div><div class="v"><span id="age">—</span><small> 초 전</small></div></div>
+    <div class="card"><div class="k">최신 seq</div><div class="v" id="seq">—</div></div>
+    <div class="card"><div class="k">총 행수 · 추정</div><div class="v" id="rows">—</div></div>
+    <div class="card"><div class="k">테이블 크기</div><div class="v"><span id="size">—</span><small> MB</small></div></div>
+    <div class="card"><div class="k">파이프라인 상태</div><div class="v" id="health">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>Rx별 수신 — 최근 60초</h3>
+    <table>
+      <thead><tr><th>Rx</th><th>행수</th><th>레이트</th><th>평균 RSSI</th></tr></thead>
+      <tbody id="rxbody"><tr><td colspan="4">로딩…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+<script>
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/stats')).json();
+    const modeCard = document.getElementById('modeCard');
+    const modeEl = document.getElementById('mode');
+    if (s.activeSession) {
+      modeEl.textContent = s.mode + ' #' + s.activeSession.id;
+      modeCard.className = 'card mode-collect';
+      modeCard.querySelector('.k').textContent = '현재 모드 · ' + s.activeSession.label;
+    } else {
+      modeEl.textContent = s.mode;
+      modeCard.className = 'card mode-infer';
+      modeCard.querySelector('.k').textContent = '현재 모드 · 무세션';
+    }
+    document.getElementById('rate').textContent = s.rate;
+    const age = document.getElementById('age');
+    age.textContent = s.lastAgeSec < 0 ? '없음' : s.lastAgeSec;
+    age.className = s.lastAgeSec > 10 ? 'stale' : '';
+    document.getElementById('seq').textContent = s.maxSeq.toLocaleString();
+    document.getElementById('rows').textContent = Number(s.approxRows).toLocaleString();
+    document.getElementById('size').textContent = s.sizeMb;
+    document.getElementById('health').textContent = s.health;
+    if (s.lastError) document.getElementById('controlMessage').textContent = s.lastError;
+    document.getElementById('rxbody').innerHTML = s.perRx.map(r =>
+      `<tr><td><span class="dot rx${r.rx_id}"></span>Rx${r.rx_id}</td><td>${r.cnt}</td><td>${(r.cnt/60).toFixed(1)} Hz</td><td>${r.rssi} dBm</td></tr>`
+    ).join('') || '<tr><td colspan="4">최근 60초 데이터 없음</td></tr>';
+    document.getElementById('updated').textContent = new Date().toLocaleTimeString() + ' 갱신';
+  } catch (e) {
+    document.getElementById('updated').textContent = '갱신 실패: ' + e;
+  }
+}
+async function control(url) {
+  const message = document.getElementById('controlMessage');
+  try {
+    const response = await fetch(url, {method:'POST'});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.message || JSON.stringify(body));
+    message.textContent = '요청 완료: ' + JSON.stringify(body);
+    await refresh();
+  } catch (e) { message.textContent = '요청 실패: ' + e.message; }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

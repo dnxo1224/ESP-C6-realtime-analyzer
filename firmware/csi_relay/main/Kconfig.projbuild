@@ -1,0 +1,17 @@
+menu "C6 CSI relay"
+config C6_RELAY_WIFI_SSID
+    string "2.4 GHz Wi-Fi SSID"
+    default ""
+config C6_RELAY_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+config C6_RELAY_SERVER_HOST
+    string "C6 ingest server host"
+    default "192.168.1.235"
+config C6_RELAY_SERVER_PORT
+    int "C6 ingest server port"
+    default 9600
+config C6_RELAY_TOKEN
+    string "Optional CSI token"
+    default ""
+endmenu

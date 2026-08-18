@@ -1,0 +1,6 @@
+python==3.10.19
+scikit-learn==1.7.2
+numpy==2.0.1
+joblib==1.5.3
+scipy==1.15.3
+pandas==2.3.3

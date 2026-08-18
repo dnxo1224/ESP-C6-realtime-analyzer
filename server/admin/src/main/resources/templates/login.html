@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSI Admin — 로그인</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<main style="max-width:400px; padding-top:15vh;">
+  <h1 class="display" style="font-size:34px;">CSI Admin</h1>
+  <p class="lead">접근 비밀번호를 입력하세요</p>
+  <div class="msg err" th:if="${err}" th:text="${err}"></div>
+  <div class="panel" style="margin-top:0;">
+    <form method="post" action="/login" style="display:flex; gap:10px;">
+      <input type="password" name="password" placeholder="비밀번호" required autofocus
+             style="flex:1; min-width:0; margin:0;">
+      <button class="btn-primary" type="submit">입장</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

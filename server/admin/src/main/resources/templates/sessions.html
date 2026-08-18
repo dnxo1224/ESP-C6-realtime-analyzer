@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSI Admin — 수집 세션</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">CSI Admin</a>
+  <a class="tab" href="/">대시보드</a>
+  <a class="tab active" href="/sessions">수집 세션</a>
+  <a class="tab" href="/inference">추론 결과</a>
+</nav>
+<main>
+  <h1 class="display">수집 세션</h1>
+  <p class="lead">모드 전환과 학습 데이터 관리 — 수집 데이터는 여기서만 삭제되며, 1시간 롤링 초기화의 대상이 아닙니다</p>
+
+  <div class="msg" th:if="${msg}" th:text="${msg}"></div>
+  <div class="msg err" th:if="${err}" th:text="${err}"></div>
+
+  <div class="panel">
+    <h3>수집 시작</h3>
+    <form method="post" action="/sessions/start">
+      <input type="text" name="location" placeholder="위치 (예: 3308호)" required>
+      <input type="text" name="behavior" placeholder="행동 (예: walk)" required>
+      <input type="text" name="person" placeholder="사람 (예: 홍길동)" required>
+      <button class="btn-primary" type="submit">수집 시작</button>
+    </form>
+    <div class="hint">시작하면 ingest가 1초 내 새 리포트에 세션 번호를 태깅합니다.
+      수집 데이터는 자동 삭제되지 않으며, 삭제는 이 페이지의 삭제 버튼(수동)뿐입니다.</div>
+  </div>
+
+  <div class="panel">
+    <h3>세션 목록</h3>
+    <table>
+      <thead><tr>
+        <th>#</th><th>위치</th><th>행동</th><th>사람</th><th>시작</th><th>종료</th><th>행수</th><th></th>
+      </tr></thead>
+      <tbody>
+        <tr th:each="r : ${rows}" th:classappend="${r.s.active} ? 'active-row'">
+          <td th:text="${r.s.sessionId}"></td>
+          <td th:text="${r.s.location} ?: '—'"></td>
+          <td>
+            <span th:text="${r.s.behavior} ?: '—'"></span>
+            <span class="badge live" th:if="${r.s.active}">수집 중</span>
+          </td>
+          <td th:text="${r.s.person} ?: '—'"></td>
+          <td th:text="${r.start}"></td>
+          <td th:text="${r.end != null} ? ${r.end} : '—'"></td>
+          <td th:text="${#numbers.formatInteger(r.rows, 0, 'COMMA')}"></td>
+          <td style="white-space:nowrap">
+            <a class="btn btn-utility" style="text-decoration:none; display:inline-block; padding:5px 14px;"
+               th:href="'/sessions/' + ${r.s.sessionId}">열기</a>
+            <form th:if="${r.s.active}" method="post" th:action="'/sessions/' + ${r.s.sessionId} + '/stop'" style="display:inline">
+              <button class="btn-utility" type="submit">종료</button>
+            </form>
+            <form th:unless="${r.s.active}" method="post" th:action="'/sessions/' + ${r.s.sessionId} + '/delete'" style="display:inline"
+                  onsubmit="return confirm('세션 데이터를 영구 삭제합니다. 계속할까요?')">
+              <button class="btn-utility" type="submit">삭제</button>
+            </form>
+          </td>
+        </tr>
+        <tr th:if="${rows.isEmpty()}"><td colspan="8">세션 없음 — 현재 추론 모드로 동작 중</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+</body>
+</html>

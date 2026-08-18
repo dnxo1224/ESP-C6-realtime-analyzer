@@ -1,0 +1,16 @@
+# This file was generated using idf.py save-defconfig. It can be edited manually.
+# Espressif IoT Development Framework (ESP-IDF) 5.5.0 Project Minimal Configuration
+#
+CONFIG_IDF_TARGET="esp32c6"
+CONFIG_PARTITION_TABLE_OFFSET=0xa000
+# INVERTED-STAR 바이너리 출력의 전제 조건: 콘솔은 USB-Serial/JTAG 단독이어야 한다.
+# UART 콘솔 + secondary USB 구성이면 ROM putc 로그가 드라이버 프레임 사이에 끼어
+# 바이너리가 오염된다. (현재 배포된 sdkconfig와 동일하게 유지할 것)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=128
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+# 무선 백홀 슬롯 지연(2/5/8/11ms)을 vTaskDelay로 맞추려면 1ms 틱이 필요하다.
+CONFIG_FREERTOS_HZ=1000

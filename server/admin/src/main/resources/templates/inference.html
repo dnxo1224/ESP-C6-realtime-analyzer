@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C6 CSI — 추론</title><link rel="stylesheet" href="/css/admin.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script></head>
+<body><nav><a class="brand" href="/">C6 CSI</a><a class="tab" href="/">대시보드</a>
+<a class="tab" href="/sessions">수집 세션</a><a class="tab active" href="/inference">추론 결과</a></nav>
+<main><h1 class="display">낙상 추론</h1>
+<p class="lead">RF 확률, 보정 임계값, 결손 품질과 에피소드 판정을 함께 표시합니다.</p>
+<div class="cards"><div class="card"><div class="k">모드</div><div class="v" id="mode">—</div></div>
+<div class="card"><div class="k">상태</div><div class="v" id="health">—</div></div>
+<div class="card"><div class="k">보정 ID</div><div class="v" id="calibration">—</div></div>
+<div class="card featured"><div class="k">현재 확률 / 임계값</div><div class="v" id="score">—</div></div></div>
+<div class="panel"><canvas id="chart" height="90"></canvas><div class="hint" id="hint">아직 추론 결과가 없습니다.</div></div>
+<div class="panel"><h3>에피소드</h3><table><thead><tr><th>시작</th><th>상태</th><th>최고 확률</th><th>판정 이유</th></tr></thead><tbody id="episodes"></tbody></table></div>
+</main><script>
+let chart;
+async function refresh(){
+ const [state,results,episodes]=await Promise.all([fetch('/api/system').then(r=>r.json()),fetch('/api/inference?minutes=60').then(r=>r.json()),fetch('/api/episodes').then(r=>r.json())]);
+ mode.textContent=state.mode; health.textContent=state.health; calibration.textContent=state.active_calibration_id||'없음';
+ if(results.length){hint.style.display='none';const last=results.at(-1);score.textContent=(last.probability*100).toFixed(1)+'% / '+(last.threshold*100).toFixed(1)+'%';
+  if(chart)chart.destroy();chart=new Chart(document.getElementById('chart'),{type:'line',data:{labels:results.map(x=>new Date(x.ts*1000).toLocaleTimeString()),datasets:[{label:'낙상 확률',data:results.map(x=>x.probability),borderColor:'#0075de'},{label:'임계값',data:results.map(x=>x.threshold),borderColor:'#dc3545'}]},options:{animation:false,scales:{y:{min:0,max:1}}}});}
+ document.getElementById('episodes').innerHTML=episodes.map(e=>`<tr><td>${new Date(e.start_ts*1000).toLocaleString()}</td><td>${e.status}</td><td>${(e.peak_probability*100).toFixed(1)}%</td><td>${e.reason||''}</td></tr>`).join('')||'<tr><td colspan="4">기록 없음</td></tr>';
+}
+refresh();setInterval(refresh,5000);
+</script></body></html>

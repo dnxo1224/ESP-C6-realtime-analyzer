@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSI Admin — 세션 데이터</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4" defer></script>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">CSI Admin</a>
+  <a class="tab" href="/">대시보드</a>
+  <a class="tab active" href="/sessions">수집 세션</a>
+  <a class="tab" href="/inference">추론 결과</a>
+</nav>
+<main>
+  <h1 class="display">세션 #<span th:text="${s.sessionId}"></span></h1>
+  <p class="lead">
+    <span th:text="${s.displayLabel()}"></span> ·
+    <span th:text="${tsRange}"></span> ·
+    <span th:text="${durationSec}"></span>초
+    <a href="/sessions" style="color:#0075de; text-decoration:none; margin-left:8px;">← 목록으로</a>
+  </p>
+
+  <div class="cards">
+    <div class="card"><div class="k">총 행수</div><div class="v" th:text="${#numbers.formatInteger(summary.total, 0, 'COMMA')}"></div></div>
+    <div class="card"><div class="k">seq 범위</div><div class="v" style="font-size:24px"
+         th:text="${summary.seq_min} + ' ~ ' + ${summary.seq_max}"></div></div>
+    <div class="card" th:each="rx : ${summary.perRx}">
+      <div class="k" th:text="'Rx' + ${rx.rx_id} + ' 행수 · 평균 RSSI'"></div>
+      <div class="v" style="font-size:24px" th:text="${rx.cnt} + ' · ' + ${rx.rssi} + 'dBm'"></div>
+    </div>
+  </div>
+
+  <!-- ==================== 분석 뷰 (탭 선택) ==================== -->
+  <div class="panel">
+    <h3 style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      분석 뷰
+      <span id="viewTabs" style="display:inline-flex; gap:6px;">
+        <button class="btn-utility view-tab" data-view="spec">스펙트로그램</button>
+        <button class="btn-utility view-tab" data-view="wave">단일 패킷 파형</button>
+        <button class="btn-utility view-tab" data-view="subc">서브캐리어 추이</button>
+      </span>
+      <span id="rxButtons" style="display:inline-flex; gap:6px; margin-left:auto;"></span>
+    </h3>
+
+    <!-- ── 뷰 1: 스펙트로그램 (시간 × 서브캐리어 × 진폭 히트맵) ── -->
+    <div id="view-spec">
+      <div style="font-size:13px; color:#a39e98; margin-bottom:6px;" id="specInfo">로딩…</div>
+      <canvas id="spec" style="width:100%; height:420px; image-rendering:pixelated; border:1px solid #e6e6e6; border-radius:8px; display:block;"></canvas>
+      <div style="display:flex; justify-content:space-between; font-size:12px; color:#a39e98; margin-top:4px;">
+        <span>가로: 패킷(시간 순) 200개 · 세로: 서브캐리어(아래=0) · 색이 진할수록 진폭 큼</span>
+        <span id="scaleLabel"></span>
+      </div>
+      <div id="specScroll" style="overflow-x:scroll; margin-top:8px; border-radius:8px; background:#f6f5f4;">
+        <div id="specSpacer" style="height:14px;"></div>
+      </div>
+      <div class="hint">아래 스크롤바를 좌우로 움직이면 시작 패킷 위치가 이동합니다 (창 = 200패킷 고정).</div>
+    </div>
+
+    <!-- ── 뷰 2: 단일 패킷 파형 (서브캐리어별 진폭) ── -->
+    <div id="view-wave" style="display:none">
+      <canvas id="chart" height="70"></canvas>
+      <div class="hint" id="hint">아래 리포트 행 표에서 행을 클릭하면 해당 패킷의 서브캐리어 진폭(gain 보상 적용)이 표시됩니다.</div>
+    </div>
+
+    <!-- ── 뷰 3: 서브캐리어 추이 (한 서브캐리어의 진폭 시계열) ── -->
+    <div id="view-subc" style="display:none">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:14px; color:#615d59;">
+        서브캐리어
+        <input type="number" id="subcIdx" value="120" min="0" max="244"
+               style="width:80px; margin:0; min-width:0;">
+        <input type="range" id="subcSlider" value="120" min="0" max="244" style="flex:1; accent-color:#0075de;">
+        <span class="hint" style="margin:0">스펙트로그램과 같은 200패킷 창을 공유합니다 — 스크롤로 창을 옮기면 함께 갱신</span>
+      </div>
+      <canvas id="subcChart" height="70"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>리포트 행
+      <span style="font-weight:400; font-size:14px; color:#a39e98"
+            th:text="'(페이지 ' + (${page}+1) + ' / ' + (${lastPage}+1) + ' · ' + ${pageSize} + '행씩)'"></span>
+    </h3>
+    <table>
+      <thead><tr><th>id</th><th>수신 시각</th><th>seq</th><th>Rx</th><th>RSSI</th><th>gain</th><th>csi_len</th></tr></thead>
+      <tbody>
+        <tr th:each="r : ${rows}" class="report-row" style="cursor:pointer"
+            th:attr="data-id=${r.id}, data-ts=${r.recv_ts}">
+          <td th:text="${r.id}"></td>
+          <td class="ts-cell" th:text="${r.recv_ts}"></td>
+          <td th:text="${r.seq}"></td>
+          <td><span th:class="'dot rx' + ${r.rx_id}"></span><span th:text="'Rx' + ${r.rx_id}"></span></td>
+          <td th:text="${r.rssi}"></td>
+          <td th:text="${r.gain}"></td>
+          <td th:text="${r.csi_len}"></td>
+        </tr>
+        <tr th:if="${rows.isEmpty()}"><td colspan="7">데이터 없음</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:14px; display:flex; gap:8px;">
+      <a class="btn btn-utility" style="text-decoration:none" th:if="${page > 0}"
+         th:href="'/sessions/' + ${s.sessionId} + '?page=' + (${page}-1)">← 이전</a>
+      <a class="btn btn-utility" style="text-decoration:none" th:if="${page < lastPage}"
+         th:href="'/sessions/' + ${s.sessionId} + '?page=' + (${page}+1)">다음 →</a>
+    </div>
+  </div>
+</main>
+<!-- th:inline="none": Thymeleaf가 JS의 [[...]] 배열 리터럴을 인라인 표현식으로 오해하지 않게 -->
+<script th:inline="none">
+// ==================== 공통 ====================
+const ACTIVE_BTN = 'background:#0075de;color:#fff;border-color:#0075de';
+const sessionId = location.pathname.split('/').filter(Boolean).pop();
+
+// 수신 시각을 사람이 읽을 형식으로
+document.querySelectorAll('.ts-cell').forEach(td => {
+  const t = parseFloat(td.textContent);
+  if (!isNaN(t)) td.textContent = new Date(t * 1000).toLocaleTimeString('ko-KR', {hour12:false}) +
+      '.' + String(Math.round((t % 1) * 1000)).padStart(3, '0');
+});
+
+// ==================== 뷰 탭 전환 ====================
+let currentView = 'spec';
+function showView(v) {
+  currentView = v;
+  for (const key of ['spec', 'wave', 'subc']) {
+    document.getElementById('view-' + key).style.display = (key === v) ? '' : 'none';
+  }
+  document.querySelectorAll('.view-tab').forEach(b =>
+    b.style.cssText = (b.dataset.view === v) ? ACTIVE_BTN : '');
+  if (v === 'subc') renderSubc();
+}
+document.querySelectorAll('.view-tab').forEach(b =>
+  b.addEventListener('click', () => showView(b.dataset.view)));
+
+// ==================== 뷰 2: 단일 패킷 파형 (행 클릭) ====================
+let waveChart = null;
+document.querySelectorAll('.report-row').forEach(tr => {
+  tr.addEventListener('click', async () => {
+    document.querySelectorAll('.report-row').forEach(x => x.style.background = '');
+    tr.style.background = 'rgba(0,117,222,.06)';
+    const id = tr.dataset.id;
+    const d = await (await fetch('/api/reports/' + id + '/csi')).json();
+    showView('wave');
+    document.getElementById('hint').textContent =
+      `리포트 #${id} — seq ${d.seq}, Rx${d.rxId}, RSSI ${d.rssi}dBm, gain ${d.gain}, 서브캐리어 ${d.amplitudes.length}개`;
+    if (waveChart) waveChart.destroy();
+    waveChart = new Chart(document.getElementById('chart'), {
+      type: 'line',
+      data: { labels: d.amplitudes.map((_, i) => i),
+              datasets: [{ label: 'CSI 진폭 (gain 보상)', data: d.amplitudes,
+                           borderColor: '#0075de', pointRadius: 0, borderWidth: 1.5, fill: false }] },
+      options: {
+        animation: false,
+        plugins: { legend: { labels: { color: '#31302e', font: { family: 'Inter' } } } },
+        scales: {
+          x: { title: { display: true, text: '서브캐리어 인덱스', color: '#a39e98' },
+               ticks: { color: '#a39e98', maxTicksLimit: 13 }, grid: { color: '#efeeec' } },
+          y: { ticks: { color: '#31302e' }, grid: { color: '#efeeec' } }
+        }
+      }
+    });
+  });
+});
+
+// ==================== 뷰 1: 스펙트로그램 ====================
+// 창 200패킷 고정. 아래 스크롤바가 전체 패킷 범위를 대표하고,
+// 스크롤 위치에 따라 해당 구간만 서버에서 받아 그린다 (전송량 일정).
+const SPEC_WINDOW = 200;
+const specCanvas = document.getElementById('spec');
+const specCtx = specCanvas.getContext('2d');
+const specScroll = document.getElementById('specScroll');
+const specSpacer = document.getElementById('specSpacer');
+const specInfo = document.getElementById('specInfo');
+const scaleLabel = document.getElementById('scaleLabel');
+
+let specRx = 1;
+let specTotal = 0;
+let specScale = 0;        // sticky 최대 진폭 — 창을 옮겨도 색 기준 유지
+let specTimer = null;
+let specData = null;      // 마지막으로 받은 창 데이터 — 서브캐리어 추이 뷰와 공유
+
+// 컬러맵: 흰색 → Notion 블루 → 짙은 네이비 (진할수록 큰 진폭)
+function specColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  const stops = [[255,255,255], [98,174,240], [0,117,222], [3,42,82]];
+  const x = t * (stops.length - 1);
+  const i = Math.min(Math.floor(x), stops.length - 2);
+  const f = x - i;
+  return [0,1,2].map(c => Math.round(stops[i][c] + (stops[i+1][c] - stops[i][c]) * f));
+}
+
+async function specLoad(offset) {
+  const d = await (await fetch(`/api/sessions/${sessionId}/spectrogram?rx=${specRx}&offset=${offset}&count=${SPEC_WINDOW}`)).json();
+  specTotal = d.total;
+  specData = d;
+  // 스크롤 범위 갱신 (1패킷 = 2px)
+  specSpacer.style.width = (specTotal > SPEC_WINDOW ? specTotal * 2 : 0) + 'px';
+
+  const n = d.amps.length;
+  if (!n) { specInfo.textContent = '이 Rx의 데이터 없음'; specCtx.clearRect(0,0,specCanvas.width,specCanvas.height); return; }
+  const subN = d.amps[0].length;
+
+  // sticky 스케일: 지금까지 본 최대 진폭 (색 기준이 창마다 흔들리지 않게)
+  for (const row of d.amps) for (const v of row) if (v > specScale) specScale = v;
+
+  specCanvas.width = n; specCanvas.height = subN;
+  const img = specCtx.createImageData(n, subN);
+  for (let x = 0; x < n; x++) {
+    for (let sc = 0; sc < subN; sc++) {
+      const [r, g, b] = specColor(d.amps[x][sc] / specScale);
+      const y = subN - 1 - sc;               // 서브캐리어 0이 아래
+      const p = (y * n + x) * 4;
+      img.data[p] = r; img.data[p+1] = g; img.data[p+2] = b; img.data[p+3] = 255;
+    }
+  }
+  specCtx.putImageData(img, 0, 0);
+
+  specInfo.textContent = `Rx${specRx} · 패킷 ${offset + 1}~${offset + n} / ${specTotal}`
+      + ` · seq ${d.seqs[0]}~${d.seqs[n-1]}`;
+  scaleLabel.textContent = `색 스케일: 0 ~ ${Math.round(specScale)}`;
+  document.getElementById('subcIdx').max = subN - 1;
+  document.getElementById('subcSlider').max = subN - 1;
+  if (currentView === 'subc') renderSubc();
+}
+
+function specOffsetFromScroll() {
+  const range = specScroll.scrollWidth - specScroll.clientWidth;
+  const maxOff = Math.max(0, specTotal - SPEC_WINDOW);
+  return range > 0 ? Math.round(specScroll.scrollLeft / range * maxOff) : 0;
+}
+
+let specLastOff = 0;
+function specMaybeReload() {
+  const off = specOffsetFromScroll();
+  if (off !== specLastOff) { specLastOff = off; specLoad(off); }
+}
+
+specScroll.addEventListener('scroll', () => {
+  clearTimeout(specTimer);
+  specTimer = setTimeout(specMaybeReload, 120);
+});
+// 백업 폴링: 스크롤 이벤트가 유실되는 환경에서도 위치 변화를 따라간다
+setInterval(specMaybeReload, 300);
+
+// Rx 선택 버튼 (스펙트로그램·서브캐리어 추이 공용)
+const rxBtns = document.getElementById('rxButtons');
+for (let rx = 1; rx <= 4; rx++) {
+  const b = document.createElement('button');
+  b.className = 'btn-utility';
+  b.textContent = 'Rx' + rx;
+  b.style.cssText = rx === specRx ? ACTIVE_BTN : '';
+  b.addEventListener('click', () => {
+    specRx = rx; specScale = 0; specLastOff = 0;
+    specScroll.scrollLeft = 0;
+    [...rxBtns.children].forEach((x, i) =>
+      x.style.cssText = (i + 1 === rx) ? ACTIVE_BTN : '');
+    specLoad(0);
+  });
+  rxBtns.appendChild(b);
+}
+
+// ==================== 뷰 3: 서브캐리어 추이 ====================
+// 스펙트로그램과 같은 창(specData)을 공유 — 선택한 서브캐리어의 진폭 시계열
+let subcChart = null;
+const subcIdx = document.getElementById('subcIdx');
+const subcSlider = document.getElementById('subcSlider');
+
+function renderSubc() {
+  if (!specData || !specData.amps.length || typeof Chart === 'undefined') return;
+  const sc = Math.max(0, Math.min(parseInt(subcIdx.value) || 0, specData.amps[0].length - 1));
+  const series = specData.amps.map(row => row[sc]);
+  if (subcChart) subcChart.destroy();
+  subcChart = new Chart(document.getElementById('subcChart'), {
+    type: 'line',
+    data: { labels: specData.seqs,
+            datasets: [{ label: `서브캐리어 ${sc} 진폭 (Rx${specRx}, 패킷 ${specData.offset + 1}~${specData.offset + series.length})`,
+                         data: series, borderColor: '#0075de', pointRadius: 0, borderWidth: 1.5, fill: false }] },
+    options: {
+      animation: false,
+      plugins: { legend: { labels: { color: '#31302e', font: { family: 'Inter' } } } },
+      scales: {
+        x: { title: { display: true, text: 'seq (시간 순)', color: '#a39e98' },
+             ticks: { color: '#a39e98', maxTicksLimit: 10 }, grid: { color: '#efeeec' } },
+        y: { ticks: { color: '#31302e' }, grid: { color: '#efeeec' } }
+      }
+    }
+  });
+}
+subcIdx.addEventListener('change', () => { subcSlider.value = subcIdx.value; renderSubc(); });
+subcSlider.addEventListener('input', () => { subcIdx.value = subcSlider.value; renderSubc(); });
+
+// ==================== 초기화 ====================
+showView('spec');
+specLoad(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+name: csi-c6
+services:
+  db:
+    image: mysql:8.4
+    container_name: csi-c6-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: csi_c6
+      MYSQL_USER: csi_c6
+      MYSQL_PASSWORD: ${DB_PASSWORD:-csi_c6_dev}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-csi_c6_root_dev}
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - csi-c6-db-data:/var/lib/mysql
+      - ./server/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  ingest:
+    build:
+      context: .
+      dockerfile: server/ingest/Dockerfile
+    container_name: csi-c6-ingest
+    restart: unless-stopped
+    environment: &db-env
+      DB_HOST: db
+      DB_NAME: csi_c6
+      DB_USER: csi_c6
+      DB_PASSWORD: ${DB_PASSWORD:-csi_c6_dev}
+      CSI_TOKEN: ${CSI_TOKEN:-}
+    ports:
+      - "9600:9600"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('127.0.0.1',9600),2);s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: server/inference/Dockerfile
+    container_name: csi-c6-worker
+    restart: unless-stopped
+    environment:
+      <<: *db-env
+      MODEL_PATH: /models/final_bundle.joblib
+      CALIBRATION_SLOTS: ${CALIBRATION_SLOTS:-19800}
+    volumes:
+      - ./models:/models:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib;assert pathlib.Path('/models/final_bundle.joblib').is_file()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  admin:
+    build:
+      context: server/admin
+    container_name: csi-c6-admin
+    restart: unless-stopped
+    environment:
+      <<: *db-env
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ports:
+      - "8180:8180"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8180/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  csi-c6-db-data:
+    name: csi-c6-db-data

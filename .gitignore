@@ -1,0 +1,27 @@
+# Local configuration and secrets
+.env
+sdkconfig.local
+**/sdkconfig
+
+# ESP-IDF generated content
+**/build/
+**/managed_components/
+**/.vscode/
+
+# Python
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Java
+**/target/
+
+# Test/runtime data
+.runtime/
+*.log
+*.err
+
+# Operating systems
+.DS_Store
+Thumbs.db
