@@ -1,7 +1,8 @@
 """공통 상수/유틸 — 모든 스크립트가 import."""
 from pathlib import Path
 
-PROJ = Path(r"C:\Users\researcher\R&D_Realtime_CSI\proj-csi_home-Fable5_auto")
+# 원 연구 프로젝트 루트 (참조 전용, 배포 이미지에는 포함되지 않음)
+PROJ = Path(__file__).resolve().parents[3]
 DATA = PROJ / "csi-home-dataset-v1.0"
 CACHE = PROJ / "cache"
 RESULTS = PROJ / "results"

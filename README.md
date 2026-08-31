@@ -79,3 +79,12 @@ Admin 화면 구성:
 
 펌웨어 빌드·플래시와 실제 배선은 [docs/HARDWARE.md](docs/HARDWARE.md), 모델/CSV 검증은
 [docs/C6_CONTRACT.md](docs/C6_CONTRACT.md)를 따른다. 원본 출처는 [SOURCE_MANIFEST.md](SOURCE_MANIFEST.md)에 고정했다.
+
+## 라이선스와 데이터 안내
+
+펌웨어는 Espressif의 [esp-csi](https://github.com/espressif/esp-csi) 예제에서 파생했으며
+Apache-2.0을 따른다([LICENSE](LICENSE)).
+
+`docs/`의 연구 문서에 나오는 **집·인물 라벨은 익명화한 것**이다
+(`home_A`~`home_C`, `P1`~`P4`). 실제 참여자 정보는 이 저장소에 포함하지 않는다.
+`samples/synced_head.csv`는 형식 검증용 30슬롯 발췌이며 전체 데이터셋은 포함하지 않는다.

@@ -11,7 +11,6 @@
 모델 SHA-256:
 
 - `final_bundle.joblib`: `163993991e79dd3ffe767f6976fc894056599bb6cb4f672a33ad16011aa6e33a`
-- `demo_bundle_no_P2.joblib`: `aa02cee79dbe9677c8617f40d3b2f0dfae8b4950e112b123f19fbd57e4414674`
 
 원본 C5 작업 트리는 생성·검증 과정에서 수정하지 않았다. C6 프로젝트 자체는 별도 `.git`과
 `main` 브랜치를 사용하며, 자동 커밋은 만들지 않았다.

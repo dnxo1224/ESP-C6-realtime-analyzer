@@ -9,7 +9,7 @@
 | 공인 IP | `<서버IP>` |
 | OS / 사양 | Ubuntu 24.04.1 LTS, x86_64, 2 vCPU, 8GB RAM, 디스크 10GB |
 | 배포 경로 | `/opt/csi` |
-| SSH | `ssh -i ~/.ssh/ncp_csi root@<서버IP>` |
+| SSH | `ssh -i ~/.ssh/<배포키> root@<서버IP>` |
 | 관리 페이지 | <http://<서버IP>:8180> |
 | 비밀값 | 서버의 `/opt/csi/.env` (권한 600, 커밋 금지) |
 
@@ -45,7 +45,7 @@
 tar czf - --exclude='./.git' --exclude='./firmware' --exclude='./docs' \
   --exclude='./server/admin/target' --exclude='./server/inference/reference' \
   --exclude='*/__pycache__' --exclude='./.env' . |
-  ssh -i ~/.ssh/ncp_csi root@<IP> "mkdir -p /opt/csi && tar xzf - -C /opt/csi"
+  ssh -i ~/.ssh/<배포키> root@<IP> "mkdir -p /opt/csi && tar xzf - -C /opt/csi"
 ```
 
 ## 5. 비밀값 생성

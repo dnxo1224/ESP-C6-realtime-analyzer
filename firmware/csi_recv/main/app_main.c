@@ -1,4 +1,12 @@
 /*
+ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Espressif esp-csi 예제에서 파생 — 1 Tx / 4 Rx 백홀과 바이너리 프레임
+ * 출력을 위해 수정했다.
+ */
+/*
  * Optimized CSI Receiver — WIRELESS-BACKHAUL Rx  (ESP32-C6 / HE20)
  * - 링버퍼 + 별도 출력 태스크로 패킷 손실 최소화
  * - 콜백에서는 큐에 넣기만 하고 즉시 리턴
