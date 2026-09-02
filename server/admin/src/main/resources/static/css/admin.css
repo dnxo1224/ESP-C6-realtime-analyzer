@@ -258,6 +258,32 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
 
+/* ── 라이브 CSI: Rx 4개 동시 표시 ── */
+.rx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .rx-grid { grid-template-columns: 1fr; } }
+
+.rx-panel {
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 10px 12px 12px; background: var(--surface);
+}
+.rx-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; font-weight: 600; color: var(--ink-secondary); margin-bottom: 8px;
+}
+.rx-head .rx-meta {
+  font-weight: 400; font-size: 12px; color: var(--ink-faint);
+  font-feature-settings: 'tnum';
+}
+.rx-legend {
+  display: flex; gap: 16px; justify-content: center; margin-top: 8px;
+  font-size: 13px; color: var(--ink-secondary);
+}
+
+/* 눌린 상태의 유틸리티 토글 */
+.btn-utility.on-toggle {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+}
+
 @media (max-width: 600px) {
   nav { padding: 8px 12px; flex-wrap: wrap; }
   main { padding: 24px 14px 64px; }

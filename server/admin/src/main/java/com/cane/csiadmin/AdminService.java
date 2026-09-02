@@ -218,38 +218,52 @@ public class AdminService {
     }
 
     /**
-     * 라이브 뷰: 해당 Rx에서 afterId 이후에 도착한 리포트를 시간순 최대 limit개,
-     * 각 리포트의 서브캐리어 진폭(246, gain 보상)과 함께 반환한다.
-     * 클라이언트는 lastId를 커서로 들고 증분 폴링한다 (afterId=0이면 최신 limit개).
+     * 라이브 뷰: afterId 이후 도착한 리포트를 Rx 4개분 한 번에 반환한다.
+     * 화면이 Rx 4개를 동시에 그리므로 왕복을 1회로 묶었고, 진폭은 색·선 높이로만
+     * 쓰여 소수점이 의미 없으므로 정수로 내려 전송량을 절반으로 줄인다.
+     * id는 Rx와 무관한 단일 증가 키라 커서 하나로 4개를 함께 따라갈 수 있다.
      */
-    public Map<String, Object> liveWindow(int rx, long afterId, int limit) {
-        var ids = new java.util.ArrayList<Long>();
-        var seqs = new java.util.ArrayList<Long>();
-        var rssis = new java.util.ArrayList<Integer>();
-        var amps = new java.util.ArrayList<double[]>();
-        jdbc.query("SELECT id, seq, rssi, gain, csi FROM "
-                   + "(SELECT id, seq, rssi, gain, csi FROM reports WHERE rx_id = ? AND id > ? "
+    public Map<String, Object> liveWindow(long afterId, int perRx) {
+        var seqs = new java.util.HashMap<Integer, java.util.List<Long>>();
+        var rssis = new java.util.HashMap<Integer, java.util.List<Integer>>();
+        var amps = new java.util.HashMap<Integer, java.util.List<int[]>>();
+        for (int rx = 1; rx <= 4; rx++) {
+            seqs.put(rx, new java.util.ArrayList<>());
+            rssis.put(rx, new java.util.ArrayList<>());
+            amps.put(rx, new java.util.ArrayList<>());
+        }
+        long[] last = { afterId };
+
+        jdbc.query("SELECT id, seq, rx_id, rssi, gain, csi FROM "
+                   + "(SELECT id, seq, rx_id, rssi, gain, csi FROM reports WHERE id > ? "
                    + " ORDER BY id DESC LIMIT ?) t ORDER BY id",
                 rs -> {
+                    int rx = rs.getInt("rx_id");
+                    if (rx < 1 || rx > 4) return;
                     byte[] blob = rs.getBytes("csi");
                     double gain = rs.getDouble("gain");
-                    double[] a = new double[246];
+                    int[] a = new int[246];
                     int out = 0;
                     for (int k = 0; k < 256; k++) {
                         if (k <= 4 || k == 128 || k >= 252) continue;
                         int re = (int) (gain * blob[2 * k]);
                         int im = (int) (gain * blob[2 * k + 1]);
-                        a[out++] = Math.round(Math.hypot(re, im) * 10.0) / 10.0;
+                        a[out++] = (int) Math.round(Math.hypot(re, im));
                     }
-                    ids.add(rs.getLong("id"));
-                    seqs.add(rs.getLong("seq"));
-                    rssis.add(rs.getInt("rssi"));
-                    amps.add(a);
+                    seqs.get(rx).add(rs.getLong("seq"));
+                    rssis.get(rx).add(rs.getInt("rssi"));
+                    amps.get(rx).add(a);
+                    long id = rs.getLong("id");
+                    if (id > last[0]) last[0] = id;
                 },
-                rx, afterId, limit);
-        return Map.of(
-                "lastId", ids.isEmpty() ? afterId : ids.get(ids.size() - 1),
-                "seqs", seqs, "rssi", rssis, "amps", amps);
+                afterId, perRx * 4);
+
+        var byRx = new java.util.LinkedHashMap<String, Object>();
+        for (int rx = 1; rx <= 4; rx++) {
+            byRx.put(String.valueOf(rx), Map.of(
+                    "seqs", seqs.get(rx), "rssi", rssis.get(rx), "amps", amps.get(rx)));
+        }
+        return Map.of("lastId", last[0], "rx", byRx);
     }
 
     // ---------- 보정 관리 ----------

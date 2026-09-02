@@ -48,21 +48,38 @@
     <div class="card"><div class="k">테이블 크기</div><div class="v"><span id="size">—</span><small> MB</small></div></div>
   </div>
 
-  <!-- ── 라이브 CSI 뷰 — 들어오는 패킷의 진폭이 실시간으로 흐른다 ── -->
+  <!-- ── 라이브 CSI — Rx1~4를 한 화면에, 뷰 종류를 탭으로 전환 ── -->
   <div class="panel">
     <h3 style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       라이브 CSI
-      <span class="seg" id="liveRxSeg"></span>
+      <span class="seg" id="liveViewSeg">
+        <button data-view="wave" class="on">파형</button>
+        <button data-view="spec">스펙트로그램</button>
+      </span>
+      <button class="btn-utility" id="btnOverlay">겹쳐 보기</button>
+      <button class="btn-utility" id="btnShareScale">색 기준 공유</button>
       <button class="btn-utility" id="btnPause">일시정지</button>
       <span style="margin-left:auto; font-size:12px; font-weight:400; color:var(--ink-faint)" id="liveInfo">대기 중…</span>
     </h3>
-    <canvas id="liveSpec" class="live-canvas" style="height:300px"></canvas>
-    <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--ink-faint); margin:4px 0 14px;">
-      <span>스펙트로그램 — 가로: 시간(오른쪽=현재, 약 18초 창) · 세로: 서브캐리어 246 · 색이 진할수록 진폭 큼</span>
-      <span id="liveScale"></span>
+
+    <!-- 파형 뷰: Rx별 개별 차트 (기본) -->
+    <div id="view-wave">
+      <div class="rx-grid" id="waveGrid"></div>
+      <div id="waveOverlayBox" style="display:none">
+        <canvas id="waveOverlay" class="live-canvas" style="height:280px"></canvas>
+        <div class="rx-legend" id="waveLegend"></div>
+      </div>
+      <div class="hint">최신 패킷의 서브캐리어별 진폭(gain 보상). 사람이 움직이면 모양이 출렁입니다.
+        <b>겹쳐 보기</b>로 네 Rx를 한 축에 포개어 비교할 수 있습니다.</div>
     </div>
-    <canvas id="liveWave" class="live-canvas" style="height:140px"></canvas>
-    <div class="hint" style="margin-top:4px">파형 — 최신 패킷의 서브캐리어별 진폭 (gain 보상). 움직임이 있으면 모양이 출렁입니다.</div>
+
+    <!-- 스펙트로그램 뷰: Rx별 히트맵 -->
+    <div id="view-spec" style="display:none">
+      <div class="rx-grid" id="specGrid"></div>
+      <div class="hint">가로 = 시간(오른쪽이 현재, 약 18초) · 세로 = 서브캐리어 246 · 색이 진할수록 진폭이 큽니다.
+        기본은 <b>Rx마다 자기 범위로 정규화</b>해 패턴이 잘 보이게 그립니다.
+        <b>색 기준 공유</b>를 켜면 네 Rx가 같은 척도를 써서 신호 세기를 직접 비교할 수 있습니다.</div>
+    </div>
   </div>
 
   <div class="two-col">
@@ -168,26 +185,48 @@ async function refreshEpisodes() {
   } catch (e) { /* 폴링 실패는 다음 주기에 재시도 */ }
 }
 
-// ==================== 라이브 CSI (스펙트로그램 + 파형) ====================
+// ==================== 라이브 CSI — Rx1~4 동시 표시 ====================
+// 뷰(파형/스펙트로그램)를 탭으로 고르고, 선택한 뷰로 네 Rx를 한 화면에 그린다.
 const LIVE_COLS = 600;            // 약 18초 @ 33Hz
 const SUB_N = 246;
-const specCanvas = document.getElementById('liveSpec');
-const specCtx = specCanvas.getContext('2d');
-const waveCanvas = document.getElementById('liveWave');
-const waveCtx = waveCanvas.getContext('2d');
-const liveInfo = document.getElementById('liveInfo');
-const liveScale = document.getElementById('liveScale');
+const RX_COLOR = { 1: '#3b82f6', 2: '#ec4899', 3: '#14b8a6', 4: '#f97316' };
+const RXS = [1, 2, 3, 4];
 
-let liveRx = 1;
+const liveInfo = document.getElementById('liveInfo');
+let liveView = 'wave';            // 기본 뷰는 파형
 let liveCursor = 0;
 let livePaused = false;
-let liveScaleMax = 0;             // sticky 최대 진폭
-let liveBuf = [];                 // 최근 LIVE_COLS개의 진폭 열
+let overlayMode = false;          // 파형 겹쳐 보기
+let sharedScale = false;          // 스펙트로그램 색 기준 공유
 let lastPacketAt = 0;
 
-specCanvas.width = LIVE_COLS; specCanvas.height = SUB_N;
+// Rx별 상태: 스펙트로그램 열 버퍼 / 최신 패킷 / sticky 최대 진폭
+const rxState = {};
+RXS.forEach(rx => { rxState[rx] = { cols: [], latest: null, seq: 0, rssi: 0, max: 1 }; });
 
-// 컬러맵: 흰색 → 인디고 → 딥 네이비 (액센트 계열)
+// ── 패널 DOM 생성 ──
+function buildPanels(gridId, canvasHeight, idPrefix) {
+  const grid = document.getElementById(gridId);
+  grid.innerHTML = RXS.map(rx => `
+    <div class="rx-panel">
+      <div class="rx-head">
+        <span><span class="dot rx${rx}"></span>Rx${rx}</span>
+        <span class="rx-meta" id="${idPrefix}Meta${rx}">—</span>
+      </div>
+      <canvas id="${idPrefix}${rx}" class="live-canvas" style="height:${canvasHeight}px"></canvas>
+    </div>`).join('');
+}
+buildPanels('waveGrid', 150, 'wave');
+buildPanels('specGrid', 210, 'spec');
+
+RXS.forEach(rx => {
+  const c = document.getElementById('spec' + rx);
+  c.width = LIVE_COLS; c.height = SUB_N;   // 픽셀 격자 = 시간×서브캐리어
+});
+document.getElementById('waveLegend').innerHTML = RXS.map(rx =>
+  `<span><span class="dot rx${rx}"></span>Rx${rx}</span>`).join('');
+
+// ── 컬러맵: 흰색 → 인디고 → 딥 네이비 ──
 function liveColor(t) {
   t = Math.max(0, Math.min(1, t));
   const stops = [[255,255,255],[199,210,254],[99,102,241],[30,27,75]];
@@ -197,86 +236,153 @@ function liveColor(t) {
   return [0,1,2].map(c => Math.round(stops[i][c] + (stops[i+1][c] - stops[i][c]) * f));
 }
 
-function drawSpec() {
-  const n = liveBuf.length;
-  const img = specCtx.createImageData(LIVE_COLS, SUB_N);
-  for (let x = 0; x < n; x++) {
-    const col = liveBuf[x];
-    const cx = LIVE_COLS - n + x;   // 오른쪽 정렬 — 최신이 항상 오른쪽 끝
-    for (let sc = 0; sc < SUB_N; sc++) {
-      const [r, g, b] = liveColor(liveScaleMax > 0 ? col[sc] / liveScaleMax : 0);
-      const p = ((SUB_N - 1 - sc) * LIVE_COLS + cx) * 4;
-      img.data[p] = r; img.data[p+1] = g; img.data[p+2] = b; img.data[p+3] = 255;
-    }
-  }
-  // 데이터 없는 왼쪽 영역은 흰색
-  for (let x = 0; x < LIVE_COLS - n; x++)
-    for (let y = 0; y < SUB_N; y++) {
-      const p = (y * LIVE_COLS + x) * 4;
-      img.data[p] = img.data[p+1] = img.data[p+2] = 255; img.data[p+3] = 255;
-    }
-  specCtx.putImageData(img, 0, 0);
+function globalMax() {
+  return Math.max(1, ...RXS.map(rx => rxState[rx].max));
 }
 
-function drawWave(amps) {
-  const W = waveCanvas.width = waveCanvas.clientWidth * (window.devicePixelRatio || 1);
-  const H = waveCanvas.height = waveCanvas.clientHeight * (window.devicePixelRatio || 1);
-  waveCtx.clearRect(0, 0, W, H);
-  if (!amps) return;
-  const max = Math.max(liveScaleMax, 1);
-  waveCtx.beginPath();
-  waveCtx.strokeStyle = '#4f46e5';
-  waveCtx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  for (let i = 0; i < amps.length; i++) {
-    const x = i / (amps.length - 1) * (W - 8) + 4;
-    const y = H - 6 - (amps[i] / max) * (H - 12);
-    i === 0 ? waveCtx.moveTo(x, y) : waveCtx.lineTo(x, y);
+function drawSpec(rx) {
+  const st = rxState[rx];
+  const ctx = document.getElementById('spec' + rx).getContext('2d');
+  const scale = sharedScale ? globalMax() : Math.max(st.max, 1);
+  const n = st.cols.length;
+  const img = ctx.createImageData(LIVE_COLS, SUB_N);
+  img.data.fill(255);                                  // 빈 영역은 흰색
+  for (let x = 0; x < n; x++) {
+    const col = st.cols[x];
+    const cx = LIVE_COLS - n + x;                      // 최신이 항상 오른쪽 끝
+    for (let sc = 0; sc < SUB_N; sc++) {
+      const [r, g, b] = liveColor(col[sc] / scale);
+      const p = ((SUB_N - 1 - sc) * LIVE_COLS + cx) * 4;
+      img.data[p] = r; img.data[p+1] = g; img.data[p+2] = b;
+    }
   }
-  waveCtx.stroke();
+  ctx.putImageData(img, 0, 0);
+  document.getElementById('specMeta' + rx).textContent =
+    st.latest ? `최대 ${Math.round(scale)}${sharedScale ? ' (공유)' : ''}` : '수신 없음';
+}
+
+function strokeWave(ctx, amps, W, H, color, max, dpr) {
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5 * dpr;
+  for (let i = 0; i < amps.length; i++) {
+    const x = i / (amps.length - 1) * (W - 8 * dpr) + 4 * dpr;
+    const y = H - 6 * dpr - (amps[i] / max) * (H - 12 * dpr);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function sizeCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  return dpr;
+}
+
+function drawWaves() {
+  if (overlayMode) {
+    const canvas = document.getElementById('waveOverlay');
+    const dpr = sizeCanvas(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const max = globalMax();       // 겹쳐 볼 때는 같은 축이어야 비교가 된다
+    RXS.forEach(rx => {
+      const st = rxState[rx];
+      if (st.latest) strokeWave(ctx, st.latest, canvas.width, canvas.height, RX_COLOR[rx], max, dpr);
+    });
+    return;
+  }
+  RXS.forEach(rx => {
+    const st = rxState[rx];
+    const canvas = document.getElementById('wave' + rx);
+    const dpr = sizeCanvas(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (st.latest) strokeWave(ctx, st.latest, canvas.width, canvas.height, RX_COLOR[rx], Math.max(st.max, 1), dpr);
+    document.getElementById('waveMeta' + rx).textContent =
+      st.latest ? `seq ${st.seq.toLocaleString()} · RSSI ${st.rssi}dBm` : '수신 없음';
+  });
+}
+
+function redraw() {
+  if (liveView === 'wave') drawWaves();
+  else RXS.forEach(drawSpec);
 }
 
 async function pollLive() {
   if (livePaused) return;
   try {
     const limit = liveCursor === 0 ? 200 : 66;
-    const d = await (await fetch(`/api/live?rx=${liveRx}&afterId=${liveCursor}&limit=${limit}`)).json();
-    if (d.amps.length) {
+    const d = await (await fetch(`/api/live?afterId=${liveCursor}&limit=${limit}`)).json();
+    let added = 0;
+    RXS.forEach(rx => {
+      const part = d.rx[rx];
+      if (!part || !part.amps.length) return;
+      const st = rxState[rx];
+      for (const a of part.amps) {
+        for (const v of a) if (v > st.max) st.max = v;
+        st.cols.push(a);
+      }
+      if (st.cols.length > LIVE_COLS) st.cols = st.cols.slice(st.cols.length - LIVE_COLS);
+      st.latest = part.amps[part.amps.length - 1];
+      st.seq = part.seqs[part.seqs.length - 1];
+      st.rssi = part.rssi[part.rssi.length - 1];
+      added += part.amps.length;
+    });
+    if (added) {
       liveCursor = d.lastId;
       lastPacketAt = Date.now();
-      for (const a of d.amps) {
-        for (const v of a) if (v > liveScaleMax) liveScaleMax = v;
-        liveBuf.push(a);
-      }
-      if (liveBuf.length > LIVE_COLS) liveBuf = liveBuf.slice(liveBuf.length - LIVE_COLS);
-      drawSpec();
-      drawWave(d.amps[d.amps.length - 1]);
-      const lastSeq = d.seqs[d.seqs.length - 1];
-      const lastRssi = d.rssi[d.rssi.length - 1];
-      liveInfo.textContent = `Rx${liveRx} · seq ${lastSeq.toLocaleString()} · RSSI ${lastRssi} dBm · +${d.amps.length}패킷`;
-      liveScale.textContent = `색 스케일: 0 ~ ${Math.round(liveScaleMax)}`;
+      redraw();
+      const live = RXS.filter(rx => rxState[rx].latest).length;
+      liveInfo.textContent = `Rx ${live}/4 수신 · +${added}패킷`;
     } else if (Date.now() - lastPacketAt > 3000) {
-      liveInfo.textContent = `Rx${liveRx} · 수신 없음 (${currentMode === 'STANDBY' ? 'STANDBY 데이터는 저장되지 않을 수 있음' : '대기 중'})`;
+      liveInfo.textContent = currentMode === 'STANDBY'
+        ? '수신 없음 — STANDBY 데이터는 1시간 뒤 삭제됩니다'
+        : '수신 없음';
     }
   } catch (e) { liveInfo.textContent = '라이브 갱신 실패'; }
 }
 
-// Rx 세그먼트 버튼
-const seg = document.getElementById('liveRxSeg');
-for (let rx = 1; rx <= 4; rx++) {
-  const b = document.createElement('button');
-  b.innerHTML = `<span class="dot rx${rx}"></span>Rx${rx}`;
-  if (rx === liveRx) b.classList.add('on');
-  b.addEventListener('click', () => {
-    liveRx = rx; liveCursor = 0; liveBuf = []; liveScaleMax = 0;
-    [...seg.children].forEach((x, i) => x.classList.toggle('on', i + 1 === rx));
-    drawSpec(); pollLive();
-  });
-  seg.appendChild(b);
-}
+// ── 뷰 탭 ──
+const viewSeg = document.getElementById('liveViewSeg');
+viewSeg.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  liveView = b.dataset.view;
+  [...viewSeg.children].forEach(x => x.classList.toggle('on', x === b));
+  document.getElementById('view-wave').style.display = liveView === 'wave' ? '' : 'none';
+  document.getElementById('view-spec').style.display = liveView === 'spec' ? '' : 'none';
+  // 뷰별로 쓰는 토글만 노출한다
+  document.getElementById('btnOverlay').style.display = liveView === 'wave' ? '' : 'none';
+  document.getElementById('btnShareScale').style.display = liveView === 'spec' ? '' : 'none';
+  redraw();
+});
+
+document.getElementById('btnOverlay').addEventListener('click', function () {
+  overlayMode = !overlayMode;
+  this.classList.toggle('on-toggle', overlayMode);
+  this.textContent = overlayMode ? '개별 보기' : '겹쳐 보기';
+  document.getElementById('waveGrid').style.display = overlayMode ? 'none' : '';
+  document.getElementById('waveOverlayBox').style.display = overlayMode ? '' : 'none';
+  drawWaves();
+});
+
+document.getElementById('btnShareScale').addEventListener('click', function () {
+  sharedScale = !sharedScale;
+  this.classList.toggle('on-toggle', sharedScale);
+  this.textContent = sharedScale ? '개별 정규화' : '색 기준 공유';
+  RXS.forEach(drawSpec);
+});
+
 document.getElementById('btnPause').addEventListener('click', function () {
   livePaused = !livePaused;
+  this.classList.toggle('on-toggle', livePaused);
   this.textContent = livePaused ? '재개' : '일시정지';
 });
+
+document.getElementById('btnShareScale').style.display = 'none';   // 기본 뷰가 파형
+window.addEventListener('resize', () => { if (liveView === 'wave') drawWaves(); });
 
 // ==================== 시작 ====================
 refresh(); refreshEpisodes(); pollLive();

@@ -182,13 +182,12 @@ public class AdminController {
     @ResponseBody
     public Map<String, Object> system() { return service.systemState(); }
 
-    /** 라이브 진폭 스트림 — afterId 커서 증분 폴링. */
+    /** 라이브 진폭 스트림 — Rx 4개를 한 번에, afterId 커서 증분 폴링. limit는 Rx당 개수. */
     @GetMapping("/api/live")
     @ResponseBody
-    public Map<String, Object> live(@RequestParam(defaultValue = "1") int rx,
-                                    @RequestParam(defaultValue = "0") long afterId,
+    public Map<String, Object> live(@RequestParam(defaultValue = "0") long afterId,
                                     @RequestParam(defaultValue = "66") int limit) {
-        return service.liveWindow(Math.min(Math.max(rx, 1), 4), afterId, Math.min(Math.max(limit, 1), 200));
+        return service.liveWindow(afterId, Math.min(Math.max(limit, 1), 200));
     }
 
     @PostMapping("/api/control/calibration/start")
