@@ -22,6 +22,12 @@ CALIBRATION_SLOTS = int(os.getenv("CALIBRATION_SLOTS", "19800"))
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "0.1"))
 CALIBRATION_POLL_SECONDS = float(os.getenv("CALIBRATION_POLL_SECONDS", "2.0"))
 
+# 낙상 판정 규칙 — 모델은 창당 확률만 내고, 확정/기각은 여기서 정한다.
+# 재학습·재보정 없이 .env로 조절할 수 있다.
+EPISODE_STILLNESS_HOLD_S = float(os.getenv("EPISODE_STILLNESS_HOLD_S", "30.0"))
+EPISODE_STILLNESS_WAIT_S = float(os.getenv("EPISODE_STILLNESS_WAIT_S", "60.0"))
+EPISODE_MERGE_GAP_S = float(os.getenv("EPISODE_MERGE_GAP_S", "3.0"))
+
 
 def db_connect():
     while True:
@@ -189,7 +195,16 @@ def run_inference(db, model, state, tracker, last_seq):
 def main():
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
     model = C6Model.load(MODEL_PATH)
-    db, tracker, last_seq = db_connect(), EpisodeTracker(), None
+    if EPISODE_STILLNESS_WAIT_S <= EPISODE_STILLNESS_HOLD_S:
+        LOG.warning("EPISODE_STILLNESS_WAIT_S(%.0fs) <= HOLD(%.0fs) — 정지를 채우기 전에 "
+                    "기각 기한이 도래해 낙상이 확정되지 않는다",
+                    EPISODE_STILLNESS_WAIT_S, EPISODE_STILLNESS_HOLD_S)
+    LOG.info("episode rule: stillness hold %.0fs, reject after %.0fs, merge gap %.0fs",
+             EPISODE_STILLNESS_HOLD_S, EPISODE_STILLNESS_WAIT_S, EPISODE_MERGE_GAP_S)
+    tracker = EpisodeTracker(merge_gap_s=EPISODE_MERGE_GAP_S,
+                             stillness_wait_s=EPISODE_STILLNESS_WAIT_S,
+                             stillness_hold_s=EPISODE_STILLNESS_HOLD_S)
+    db, last_seq = db_connect(), None
     set_health(db, "OK", model_sha=model.sha256)
     while True:
         try:

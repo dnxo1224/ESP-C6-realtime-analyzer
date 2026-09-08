@@ -68,6 +68,10 @@ services:
       <<: *db-env
       MODEL_PATH: /models/final_bundle.joblib
       CALIBRATION_SLOTS: ${CALIBRATION_SLOTS:-19800}
+      # 낙상 판정 규칙 (재학습 없이 조절 가능)
+      EPISODE_STILLNESS_HOLD_S: ${EPISODE_STILLNESS_HOLD_S:-30}
+      EPISODE_STILLNESS_WAIT_S: ${EPISODE_STILLNESS_WAIT_S:-60}
+      EPISODE_MERGE_GAP_S: ${EPISODE_MERGE_GAP_S:-3}
     volumes:
       - ./models:/models:ro
     depends_on:
