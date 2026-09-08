@@ -25,3 +25,9 @@ sdkconfig.local
 # Operating systems
 .DS_Store
 Thumbs.db
+
+# 수집기 출력 (원시 CSI CSV — 저장소에 넣지 않는다)
+tools/data/
+
+# 합성 음성 캐시 (실행 시 자동 생성)
+tools/assets/voice/
