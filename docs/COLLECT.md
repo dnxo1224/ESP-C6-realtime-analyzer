@@ -24,7 +24,7 @@ pc_time을 맞춰 자동 계산하므로, 수집 중에 라벨을 입력할 필�
 ```powershell
 # 이벤트 세션 (10분 10초, 낙상 6회 + 휴식 2회)
 python tools\collect_session.py --mode event --session-no 1 --subject A --config o1_f01 `
-  --collector-cmd "python tools\csi_session.py --port COM4 --duration 630 --prep 0 --session-dir <세션폴더>"
+  --collector-cmd "python tools\csi_session.py --port COM4 --duration 650 --prep 0 --session-dir {session_dir}"
 
 # 일상 세션 (10분 10초, 낙상 없음 — 시간당 오경보 측정용)
 python tools\collect_session.py --mode life --session-no 1 --subject A --config o1_f01
@@ -35,6 +35,11 @@ python tools\collect_session.py --mode empty --minutes 15 --config o1_f01
 # 리허설 (수집기 없이 타이머·음성·화면만)
 python tools\collect_session.py --dry-run --mode event --session-no 3
 ```
+
+`{session_dir}`는 실제 세션 폴더로 치환된다 — 폴더 이름에 실행 시각이 들어가 미리 알 수 없기 때문이다.
+수집기의 `--duration`은 **세션 길이 + 30초** 정도로 잡는다. 점검이 큐 t0 **앞뒤로 10초 이상**
+프레임이 있기를 요구하는데, 큐 스크립트가 수집기를 먼저 띄우고 13초 뒤에 첫 삐를 내므로
+앞쪽은 자동으로 확보되고 뒤쪽 여유만 이 값으로 준다 (event/life 10:10 → `--duration 650`).
 
 `--mute`(무음), `--windowed`(창 모드)는 리허설·개발용이다.
 

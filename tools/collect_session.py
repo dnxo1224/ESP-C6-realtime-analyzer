@@ -319,7 +319,9 @@ class SessionRunner:
         self.root.mainloop()
 
     def _start_collector(self):
-        cmd = self.args.collector_cmd
+        # 세션 폴더는 실행 시각으로 정해지므로 사용자가 미리 알 수 없다.
+        # {session_dir} 자리표시자를 실제 경로로 바꿔 넘긴다.
+        cmd = self.args.collector_cmd.replace("{session_dir}", self.out_dir)
         self.log(f"[*] 수집기 실행: {cmd}")
         self.collector = subprocess.Popen(cmd, shell=True)
         # 수집기가 포트를 열고 첫 프레임을 받을 시간을 준다 (문서 4.1)
@@ -483,6 +485,16 @@ class SessionRunner:
             w.writeheader()
             w.writerows(self.rows)
 
+        # 점검은 수집기가 파일을 닫은 뒤에 해야 한다. 강제 종료하면 버퍼가 남고
+        # meta.json이 안 써지므로, 스스로 끝나기를 기다린 뒤 마지막에만 끊는다.
+        if self.collector and self.collector.poll() is None:
+            self.log("[*] 수집기가 스스로 끝나기를 기다리는 중 (최대 90초)…")
+            try:
+                self.collector.wait(timeout=90)
+            except subprocess.TimeoutExpired:
+                self.log("[!] 수집기가 끝나지 않아 종료합니다 — 파일이 잘렸을 수 있습니다")
+                self.collector.terminate()
+
         meta = {
             "session_id": os.path.basename(self.out_dir),
             "mode": self.args.mode,
@@ -606,9 +618,11 @@ def main():
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                   "data", "collect"))
     ap.add_argument("--collector-cmd", default=None,
-                    help="수집기를 서브프로세스로 띄울 명령 (없으면 이미 돌고 있다고 가정)")
-    ap.add_argument("--collector-warmup", type=float, default=6.0,
-                    help="수집기 기동 후 첫 삐까지 기다릴 시간(초)")
+                    help="수집기를 서브프로세스로 띄울 명령. {session_dir}는 실제 세션 폴더로 치환된다 "
+                         "(없으면 수집기가 이미 돌고 있다고 가정)")
+    ap.add_argument("--collector-warmup", type=float, default=10.0,
+                    help="수집기 기동 후 첫 삐까지 기다릴 시간(초). 점검이 t0 앞 10초 여유를 "
+                         "요구하므로 이보다 줄이지 말 것 (실제 여유 = 이 값 + 3초)")
     ap.add_argument("--orientation", type=int, default=1)
     ap.add_argument("--furniture-note", default="")
     ap.add_argument("--mat-position", default="")
